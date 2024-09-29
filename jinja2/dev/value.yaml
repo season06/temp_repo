@@ -1,0 +1,3 @@
+dev:
+    namespace: dev
+    replicas: 4
