@@ -1,86 +1,93 @@
-from abc import ABC, abstractmethod
-from typing import Any
-import pydantic
+import json
+import re
+from typing import Any, Dict, List, Tuple
 
+class BaseModel:
+    table_name: str = ""
+    fields: Dict[str, str] = {}
 
-class PipelineContext:
-    def __init__(self):
-        self.stages = []
-        self.is_immutable = True
+    @classmethod
+    def _validate_fields(cls, fields: List[str]) -> None:
+        for field in fields:
+            if field not in cls.fields:
+                raise ValueError(f"Invalid field: {field}")
 
-    @staticmethod
-    def _validate(stage):
-        if not isinstance(stage, StageInterface):
-            raise ValueError(f'Class `{stage.__class__.__name__}` must be an instance of StageInterface')
+    @classmethod
+    def _validate_conditions(cls, conditions: List[Tuple[str, str, Any]]) -> None:
+        for condition in conditions:
+            if len(condition) != 3:
+                raise ValueError(f"Invalid condition: {condition}")
+            if condition[0] not in cls.fields:
+                raise ValueError(f"Invalid condition field: {condition[0]}")
 
-    def add_stage(self, stage: Any) -> None:
-        self._validate(stage)
-        self.stages.append(stage)
-
-    def run(self) -> None:
-        result = None
-        for obj in self.stages:
-            result = obj.execute(result)
-            print(f"{obj.__class__.__name__}: {result}")
-
-class StageInterface(ABC):
-    def __init__(self):
-        sop_id: str
-        # ctx: SopModel
-        # if getattr(obj, 'conditions').get('test'):
-
-    @abstractmethod
-    def execute(self):
-        raise NotImplementedError
-
-# class SopModel(pydantic.BaseModel):
-#     id:
-#     candidates:
-
-"""""""""################"""""""""
-
-class SqlQuery(StageInterface):
-    def __init__(self):
-        super().__init__()
-        # self.stage_ctx = StageCtx(
-        #     id=id,
-        #     candidates=candidates
-        # )
-
-    def execute(self, candidate):
-        return [1, 2]
-
-class EnvFilter(StageInterface):
-    def __init__(self):
-        super().__init__()
-
-    def execute(self, candidate):
-        return [1]
-
-class Test1(StageInterface):
-    def __init__(self):
-        pass
-
-    def filter(self, candidate):
-        return [1]
+    @classmethod
+    def _convert(cls, value: Any) -> str:
+        if isinstance(value, str):
+            # Check SQL statement
+            sql_stat = re.match(r"select|insert|update|delete", str(value))
+            if sql_stat:
+                return value
+            # Escape string with single quotes
+            return f"'{value}'"
+        
+        # Convert dict to JSON string
+        if isinstance(value, dict):
+            return f"'{json.dumps(value)}'"
+        
+        # Convert other types to string
+        return str(value)
     
-# class Test2:
-#     def __init__(self):
-#         pass
-#     def execute(self, candidate):
-#         return [1]
+    @classmethod
+    def insert(cls, **kwargs: Any) -> str:
+        cls._validate_fields(kwargs.keys())
+
+        keys = ", ".join(kwargs.keys())
+        values = ", ".join(cls._convert(val) for val in kwargs.values())
+        sql = f"""
+        INSERT INTO {cls.table_name} 
+        ({keys})
+        VALUES 
+        ({values})
+        """
+        return sql
+
+    @classmethod
+    def update(cls, conditions: List[Tuple[str, str, Any]], **kwargs: Any) -> str:
+        cls._validate_fields(list(kwargs.keys()))
+        cls._validate_conditions(conditions)
     
-if __name__ == '__main__':
-    sql_query = SqlQuery()
-    env_filter = EnvFilter()
-    test1 = Test1()
-    # test2 = Test2()
+        set_clause = ', '.join(f"{col} = {cls._convert(val)}" for col, val in kwargs.items())
+        conditions_clause = ' AND '.join(f"{col} {op} {cls._convert(val)}" for col, op, val in conditions)
+        sql = f"""
+        UPDATE {cls.table_name} 
+        SET {set_clause} 
+        WHERE {conditions_clause}
+        """
+        return sql
 
-    pipeline = PipelineContext()
-    pipeline.add_stage(sql_query)
-    pipeline.add_stage(env_filter)
-    pipeline.add_stage(test1)
-    # pipeline.add_stage(test2)
-    pipeline.run()
+class User(BaseModel):
+    table_name = "users"
+    fields = {
+        "name": "TEXT",
+        "email": "TEXT",
+        "age": "INTEGER",
+        "info": "JSON",
+        "sn": "TEXT",
+    }
 
-# https://ithelp.ithome.com.tw/articles/10223418
+if __name__ == "__main__":
+    info = {
+        "address": "123 Main St",
+        "city": "Springfield",
+        "state": "IL",
+    }
+    sql = User.insert(name="Alice", email="alice@example.com", age=30, info=info,
+                sn="select x.sn from TABLE x where x.id = '123'")
+    print(sql)
+
+    conditions = [
+        ("name", "=", "Alice"),
+        ("age", "<", 10),
+    ]
+    sql = User.update(conditions, name="Alice Johnson", email="alice@example.com", age=30)
+    print(sql)
