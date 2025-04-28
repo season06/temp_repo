@@ -1,93 +1,55 @@
-import json
-import re
-from typing import Any, Dict, List, Tuple
+import logging
+from datetime import datetime, timedelta
+from abc import ABC, abstractmethod
+class StageInterface(ABC):
+    @abstractmethod
+    def process(self, context):
+        raise NotImplementedError("Subclasses must implement process()")
 
-class BaseModel:
-    table_name: str = ""
-    fields: Dict[str, str] = {}
+class APM:
+    def __init__(self):
+        self.db_client = None
 
-    @classmethod
-    def _validate_fields(cls, fields: List[str]) -> None:
-        for field in fields:
-            if field not in cls.fields:
-                raise ValueError(f"Invalid field: {field}")
+    def get_apm_event(self):
+        sql = ''
+        result = {
+            'start_time': datetime.now()+timedelta(days=-1),
+            'end_time': datetime.now()+timedelta(days=1)
+        }
+        return result
 
-    @classmethod
-    def _validate_conditions(cls, conditions: List[Tuple[str, str, Any]]) -> None:
-        for condition in conditions:
-            if len(condition) != 3:
-                raise ValueError(f"Invalid condition: {condition}")
-            if condition[0] not in cls.fields:
-                raise ValueError(f"Invalid condition field: {condition[0]}")
-
-    @classmethod
-    def _convert(cls, value: Any) -> str:
-        if isinstance(value, str):
-            # Check SQL statement
-            sql_stat = re.match(r"select|insert|update|delete", str(value))
-            if sql_stat:
-                return value
-            # Escape string with single quotes
-            return f"'{value}'"
-        
-        # Convert dict to JSON string
-        if isinstance(value, dict):
-            return f"'{json.dumps(value)}'"
-        
-        # Convert other types to string
-        return str(value)
+    def is_in_apm_duration(self, start_time, end_time):
+        current_time = datetime.now()
+        if start_time <= current_time <= end_time:
+            return True
+        return False
     
-    @classmethod
-    def insert(cls, **kwargs: Any) -> str:
-        cls._validate_fields(kwargs.keys())
-
-        keys = ", ".join(kwargs.keys())
-        values = ", ".join(cls._convert(val) for val in kwargs.values())
-        sql = f"""
-        INSERT INTO {cls.table_name} 
-        ({keys})
-        VALUES 
-        ({values})
-        """
-        return sql
-
-    @classmethod
-    def update(cls, conditions: List[Tuple[str, str, Any]], **kwargs: Any) -> str:
-        cls._validate_fields(list(kwargs.keys()))
-        cls._validate_conditions(conditions)
+    @abstractmethod
+    def handle_status(self, event, context):
+        raise NotImplementedError("Subclasses must implement handle_status()")
     
-        set_clause = ', '.join(f"{col} = {cls._convert(val)}" for col, val in kwargs.items())
-        conditions_clause = ' AND '.join(f"{col} {op} {cls._convert(val)}" for col, op, val in conditions)
-        sql = f"""
-        UPDATE {cls.table_name} 
-        SET {set_clause} 
-        WHERE {conditions_clause}
-        """
-        return sql
+    def execute(self):
+        event = self.get_apm_event()
+        if event is None:
+            logging.info('No event found')
+            return False
+        
+        if not self.is_in_apm_duration(event['start_time'], event['end_time']):
+            logging.info('Not in APM duration')
+            return False
+        
+        self.handle_status()
 
-class User(BaseModel):
-    table_name = "users"
-    fields = {
-        "name": "TEXT",
-        "email": "TEXT",
-        "age": "INTEGER",
-        "info": "JSON",
-        "sn": "TEXT",
-    }
+class Stage1(StageInterface, APM):
+    def __init__(self):
+        super().__init__()
+    
+    def process(self, context):
+        self.execute()
+    
+    def handle_status(self):
+        logging.info('Handling status in Stage1')
 
-if __name__ == "__main__":
-    info = {
-        "address": "123 Main St",
-        "city": "Springfield",
-        "state": "IL",
-    }
-    sql = User.insert(name="Alice", email="alice@example.com", age=30, info=info,
-                sn="select x.sn from TABLE x where x.id = '123'")
-    print(sql)
-
-    conditions = [
-        ("name", "=", "Alice"),
-        ("age", "<", 10),
-    ]
-    sql = User.update(conditions, name="Alice Johnson", email="alice@example.com", age=30)
-    print(sql)
+if __name__ == '__main__':
+    stage1 = Stage1()
+    stage1.process(None)

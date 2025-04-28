@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: example-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  tls:
+  - hosts:
+    - test.example.com
+    secretName: wildcard-tls
+  rules:
+  - host: test.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: test-web
+            port:
+              number: 80

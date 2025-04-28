@@ -1,0 +1,1 @@
+ref: https://unruly-toast-932.notion.site/K8s-Ingress-and-Certificate-Setup-1b43d75eaf57802c938ed18257453d7f
