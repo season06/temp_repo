@@ -1,21 +1,23 @@
-# deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: myapp
+  name: test-web
+  labels:
+    app: test-web
 spec:
   replicas: 1  ## k
   selector:
     matchLabels:
-      app: myapp
+      app: test-web
   template:
     metadata:
       labels:
-        app: myapp
+        app: test-web
     spec:
       containers:
-      - name: myapp
-        image: myapp:latest
+      - name: nginx
+        image: nginx:latest
         ports:
         - containerPort: 80
+        resources: {}
         

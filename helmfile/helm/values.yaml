@@ -1,0 +1,12 @@
+replicaCount: 1
+image:
+  repository: nginx
+  tag: latest
+resources: {}
+hostname: example.com
+certSecret: wildcard-tls
+certificate:
+  dnsNames: []
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod

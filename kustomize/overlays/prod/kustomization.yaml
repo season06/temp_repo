@@ -6,9 +6,9 @@ resources:
 patches:
 - path: resources-patch.yaml
 
-namespace: dev
-nameSuffix: -dev
+namespace: prod
+nameSuffix: -prod
 
 replicas:
 - name: test-web
-  count: 2
+  count: 3

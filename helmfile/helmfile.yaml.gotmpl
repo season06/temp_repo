@@ -1,0 +1,14 @@
+environments:
+  dev:
+    values:
+      - environments/dev.yaml
+  prod:
+    values:
+      - environments/prod.yaml
+---
+releases:
+  - name: web-app
+    namespace: {{ .Environment.Name }}
+    chart: ./templates/web-app
+    values:
+      - values.yaml
