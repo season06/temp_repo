@@ -1,46 +1,81 @@
-# Kustomization
+# SQL
 
-ref: https://unruly-toast-932.notion.site/K8s-Ingress-and-Certificate-Setup-1b43d75eaf57802c938ed18257453d7f
+CREATE DATABASE IF NOT EXISTS testdb;
 
-## Directory
-```
-kustomize/
-├── base
-│   └── resources
-│       ├── certificate.yaml
-│       ├── deployment.yaml
-│       ├── ingress.yaml
-│       └── service.yaml
-└── overlays
-    ├── dev
-    |   ├──  kustomization.yaml
-    |   └── podinfo-values.yaml
-    └── prod
-        ├──  kustomization.yaml
-        └── podinfo-values.yaml
+USE testdb;
 
-```
-## Dry run
-```
-kustomize build .\kustomize\overlays\dev\ > output.yaml
-```
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100),
+    email VARCHAR(100),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 
-# Helmfile
+INSERT INTO users (name, email) VALUES
+('Alice', 'alice@example.com'),
+('Bob', 'bob@example.com'),
+('test', 'test@test.com');
 
-## Directory
-```
-helmfile/
-├── helmfile.yaml
-├── environments/
-│   ├── dev.yaml
-│   └── prod.yaml
-└── templates/
-    └── web-app/
-        ├── Chart.yaml
-        ├── templates/
-        │   ├── deployment.yaml
-        │   ├── service.yaml
-        │   ├── ingress.yaml
-        │   └── certificate.yaml
-        └── values.yaml
-```
+CREATE TABLE event_log (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event_name VARCHAR(255),
+    executed_at DATETIME DEFAULT NOW(),
+    message TEXT
+);
+
+SET GLOBAL event_scheduler = ON;
+
+DELIMITER //
+
+CREATE EVENT IF NOT EXISTS purge_logs
+ON SCHEDULE EVERY 3 MINUTE
+DO
+BEGIN
+    DELETE FROM users WHERE created_at < NOW() - INTERVAL 30 SECOND;
+
+    INSERT INTO event_log (event_name, message)
+    VALUES ('purge_logs', 'Successfully purged logs older.');
+
+    INSERT INTO users (name, email) 
+    VALUES ('xxx', 'xxx@example.com');
+END;
+//
+
+DELIMITER ;
+
+---
+
+SELECT 
+    EVENT_NAME,
+    STATUS,
+    LAST_EXECUTED,
+    INTERVAL_VALUE,
+    INTERVAL_FIELD
+FROM 
+    information_schema.EVENTS
+WHERE 
+    EVENT_SCHEMA = 'testdb';
+
+SHOW VARIABLES LIKE 'event_scheduler';
+SHOW PROCESSLIST;
+select * from event_log;
+
+---
+
+docker run -d \
+  --name mariadb \
+  -v $(pwd)/my.cnf:/etc/mysql/my.cnf:ro \
+  -v $(pwd)/init.sql:/docker-entrypoint-initdb.d/init.sql:ro \
+  -e MARIADB_ROOT_PASSWORD=root \
+  -p 3306:3306 \
+  mariadb:11 \
+  --defaults-file=/etc/mysql/my.cnf
+  
+docker run -d \
+  --name mariadb \
+  -v $(pwd)/init.sql:/docker-entrypoint-initdb.d/init.sql:ro \
+  -e MARIADB_ROOT_PASSWORD=root \
+  -p 3306:3306 \
+  mariadb:11
+
+docker exec -it mariadb /bin/bash
