@@ -1,1 +1,1 @@
-# yaml_templating
+# mongodb with replica set
