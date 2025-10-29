@@ -1,6 +1,0 @@
-{
-    "dev": {
-        "namespace": "dev",
-        "replicas": 2
-    }
-}
