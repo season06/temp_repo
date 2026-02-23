@@ -1,0 +1,62 @@
+[
+    {
+        "type": "method",
+        "name": "Test.__init__",
+        "decorators": [],
+        "params": [
+            "self"
+        ],
+        "return_type": null,
+        "dependencies": []
+    },
+    {
+        "type": "method",
+        "name": "Test.execute",
+        "decorators": [],
+        "params": [
+            "self"
+        ],
+        "return_type": null,
+        "dependencies": [
+            "print"
+        ]
+    },
+    {
+        "type": "function",
+        "name": "fibonacci",
+        "decorators": [
+            "@lru_cache(maxsize=None)"
+        ],
+        "params": [
+            "n"
+        ],
+        "return_type": null,
+        "dependencies": [
+            "fibonacci"
+        ]
+    },
+    {
+        "type": "function",
+        "name": "get_name",
+        "decorators": [],
+        "params": [],
+        "return_type": "str",
+        "dependencies": []
+    },
+    {
+        "type": "function",
+        "name": "hello",
+        "decorators": [],
+        "params": [
+            "name"
+        ],
+        "return_type": "None",
+        "dependencies": [
+            "get_name",
+            "fibonacci",
+            "Test",
+            "test.execute",
+            "print"
+        ]
+    }
+]
