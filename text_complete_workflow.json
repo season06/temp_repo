@@ -1,0 +1,26 @@
+{
+  "name": "my_ai_workflow",
+  "version": 1,
+  "tasks": [
+    {
+      "name": "summarize",
+      "taskReferenceName": "summarize_ref",
+      "type": "LLM_TEXT_COMPLETE",
+      "inputParameters": {
+        "llmProvider": "<your-integration-name>",
+        "model": "gpt-4o",
+        "promptName": "my-saved-prompt",
+        "promptVariables": {
+          "text": "${workflow.input.text}"
+        },
+        "temperature": 0.7,
+        "maxTokens": 512
+      }
+    }
+  ],
+  "inputParameters": ["text"],
+  "outputParameters": {
+    "result": "${summarize_ref.output.result}"
+  },
+  "schemaVersion": 2
+}

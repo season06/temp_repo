@@ -1,0 +1,51 @@
+{
+  "name": "dynamic_agent_planner",
+  "version": 1,
+  "schemaVersion": 2,
+  "tasks": [
+    {
+      "name": "generate_plan",
+      "taskReferenceName": "planner",
+      "type": "LLM_CHAT_COMPLETE",
+      "inputParameters": {
+        "llmProvider": "openai",
+        "model": "gpt-4o",
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are a workflow planner. Given a user task, generate a Conductor workflow definition as JSON. Available task types: LLM_CHAT_COMPLETE, CALL_MCP_TOOL, LIST_MCP_TOOLS, HTTP, HUMAN, LLM_SEARCH_INDEX. The workflow must include a 'name', 'tasks' array, and 'outputParameters'."
+          },
+          {
+            "role": "user",
+            "message": "${workflow.input.task}"
+          }
+        ],
+        "temperature": 0.2
+      }
+    },
+    {
+      "name": "review_plan",
+      "taskReferenceName": "approval",
+      "type": "HUMAN",
+      "inputParameters": {
+        "generatedWorkflow": "${planner.output.result}"
+      }
+    },
+    {
+      "name": "execute_plan",
+      "taskReferenceName": "execution",
+      "type": "START_WORKFLOW",
+      "inputParameters": {
+        "startWorkflow": {
+          "name": "${planner.output.result.name}",
+          "workflowDefinition": "${planner.output.result}",
+          "input": "${workflow.input.taskInput}"
+        }
+      }
+    }
+  ],
+  "outputParameters": {
+    "generatedPlan": "${planner.output.result}",
+    "executionId": "${execution.output.workflowId}"
+  }
+}

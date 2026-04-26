@@ -1,0 +1,24 @@
+{
+  "name": "my_chat_workflow",
+  "version": 1,
+  "tasks": [
+    {
+      "name": "chat",
+      "taskReferenceName": "chat_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "inputParameters": {
+        "llmProvider": "<your-integration-name>",
+        "model": "gpt-4o",
+        "instructions": "You are a helpful assistant.",
+        "userInput": "${workflow.input.question}",
+        "temperature": 0.5,
+        "maxTokens": 1024
+      }
+    }
+  ],
+  "inputParameters": ["question"],
+  "outputParameters": {
+    "answer": "${chat_ref.output.result}"
+  },
+  "schemaVersion": 2
+}

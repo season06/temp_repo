@@ -1,0 +1,60 @@
+{
+  "name": "db_qa_agent",
+  "version": 1,
+  "description": "Agentic Q&A workflow: answers user questions by querying a database via MCP tools. The LLM decides whether to call the MCP tool (zero, one, or multiple times) before producing a final answer.",
+  "tasks": [
+    {
+      "name": "agentic_loop",
+      "taskReferenceName": "agentic_loop_ref",
+      "type": "DO_WHILE",
+      "loopCondition": "if ($.agentic_loop_ref['iteration'] < 5 && $.chat_ref['output']['toolCalls'] != null && $.chat_ref['output']['toolCalls'].length > 0) { true; } else { false; }",
+      "loopOver": [
+        {
+          "name": "chat",
+          "taskReferenceName": "chat_ref",
+          "type": "LLM_CHAT_COMPLETE",
+          "inputParameters": {
+            "llmProvider": "${workflow.input.llmProvider}",
+            "model": "${workflow.input.model}",
+            "instructions": "You are a database assistant. Use the provided tools to query the database and answer the user's question accurately. Call the tool as many times as needed. When you have sufficient information, give a concise, accurate final answer without calling any more tools.",
+            "userInput": "${workflow.input.question}",
+            "temperature": 0,
+            "maxTokens": 2048,
+            "tools": [
+              {
+                "name": "query_database",
+                "type": "CALL_MCP_TOOL",
+                "description": "Query the database. Use this tool to look up records, run queries, or retrieve schema information.",
+                "configParams": {
+                  "mcpServer": "${workflow.input.mcpServer}",
+                  "headers": "${workflow.input.mcpHeaders}"
+                },
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "arguments": {
+                      "type": "object",
+                      "description": "Arguments passed to the database tool (e.g. SQL query, table name, filter conditions)"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "inputParameters": [
+    "question",
+    "llmProvider",
+    "model",
+    "mcpServer",
+    "mcpHeaders"
+  ],
+  "outputParameters": {
+    "answer": "${chat_ref.output.result}",
+    "toolCallCount": "${agentic_loop_ref.output.iteration}"
+  },
+  "schemaVersion": 2
+}
