@@ -42,7 +42,7 @@ Content-Type: application/json
 ```bash
 curl -X POST http://localhost:8000/api/metadata/workflow \
   -H "Content-Type: application/json" \
-  -d @my_workflow.json
+  -d @./workflow_2/dynamic_agent_planner.json
 ```
 
 ---
@@ -132,7 +132,7 @@ Content-Type: application/json
 ```bash
 curl -X POST "http://localhost:8000/api/workflow/my_workflow?version=1" \
   -H "Content-Type: application/json" \
-  -d '{"key": "hello"}'
+  -d '{"role": "user"}'
 ```
 
 **Response** — the workflow instance ID (plain text):
@@ -146,6 +146,35 @@ Track it later:
 ```bash
 curl http://localhost:8000/api/workflow/a1b2c3d4-0000-0000-0000-000000000000
 ```
+
+### Example: `dynamic_agent_planner`                                                                                   
+                                                                                                                       
+This workflow takes a natural-language task, uses an LLM (GPT-4o) to generate a Conductor workflow definition, waits for human approval, then executes the generated workflow.
+
+**Input parameters:**
+
+| Field | Type | Description |
+|---|---|---|
+| `task` | string | Natural-language description of what the generated workflow should do |
+| `taskInput` | object | Input passed into the dynamically generated sub-workflow |
+
+**Output parameters:**
+
+| Field | Description |
+|---|---|
+| `generatedPlan` | The workflow definition JSON produced by the LLM |
+| `executionId` | Workflow instance ID of the executed sub-workflow |
+
+```bash                                                                                                                
+curl -X POST "http://localhost:8000/api/workflow/dynamic_agent_planner?version=1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Fetch the latest news headlines and summarize them into bullet points",
+    "taskInput": {
+      "topic": "AI"
+    }
+  }'
+```                                                                                                                    
 
 ---
 
