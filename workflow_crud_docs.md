@@ -174,7 +174,7 @@ curl -X POST "http://localhost:8000/api/workflow/dynamic_agent_planner?version=1
       "topic": "AI"
     }
   }'
-```                                                                                                                    
+```
 
 ---
 

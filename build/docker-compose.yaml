@@ -14,6 +14,8 @@ services:
     #   dockerfile: docker/server/Dockerfile
     #   args:
     #     YARN_OPTS: ${YARN_OPTS}
+    volumes:
+      - ./server/config:/app/config:ro
     networks:
       - internal
     ports:
@@ -68,8 +70,30 @@ services:
         max-size: "1k"
         max-file: "3"
 
+  conductor-pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: conductor-pgvector
+    environment:
+      - POSTGRES_USER=conductor
+      - POSTGRES_PASSWORD=conductor
+      - POSTGRES_DB=conductor_vectors
+    networks:
+      - internal
+    ports:
+      - 5432:5432
+    volumes:
+      - pgvectordata-conductor:/var/lib/postgresql/data
+      - ./pgvector-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conductor -d conductor_vectors"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   esdata-conductor:
+    driver: local
+  pgvectordata-conductor:
     driver: local
 
 networks:

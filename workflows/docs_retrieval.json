@@ -1,0 +1,71 @@
+{
+  "name": "Document_RAG_Workflow",
+  "description": "Index a document chunk into pgvector and answer a question using the indexed content.",
+  "version": 1,
+  "schemaVersion": 2,
+  "tasks": [
+    {
+      "name": "index_document",
+      "taskReferenceName": "index_document_ref",
+      "type": "LLM_INDEX_TEXT",
+      "inputParameters": {
+        "vectorDB": "pgvector-local",
+        "index": "docs_index",
+        "namespace": "rag_demo",
+        "docId": "${workflow.input.docId}",
+        "text": "${workflow.input.text}",
+        "embeddingModelProvider": "openai",
+        "embeddingModel": "text-embedding-3-small",
+        "dimensions": 1536,
+        "metadata": {
+          "source": "${workflow.input.docId}"
+        }
+      }
+    },
+    {
+      "name": "search_index",
+      "taskReferenceName": "search_index_ref",
+      "type": "LLM_SEARCH_INDEX",
+      "inputParameters": {
+        "vectorDB": "pgvector-local",
+        "index": "docs_index",
+        "namespace": "rag_demo",
+        "query": "${workflow.input.question}",
+        "embeddingModelProvider": "openai",
+        "embeddingModel": "text-embedding-3-small",
+        "dimensions": 1536,
+        "maxResults": 3
+      }
+    },
+    {
+      "name": "answer_with_chat",
+      "taskReferenceName": "answer_with_chat_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "inputParameters": {
+        "llmProvider": "openai",
+        "model": "gpt-4o-mini",
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are a helpful assistant. Answer the user's question using only the provided context. If the context does not contain enough information, say so."
+          },
+          {
+            "role": "user",
+            "message": "Context:\n${search_index_ref.output.result}\n\nQuestion: ${workflow.input.question}"
+          }
+        ],
+        "temperature": 0.2,
+        "maxTokens": 512
+      }
+    }
+  ],
+  "inputParameters": [
+    "text",
+    "docId",
+    "question"
+  ],
+  "outputParameters": {
+    "search_results": "${search_index_ref.output.result}",
+    "answer": "${answer_with_chat_ref.output.result}"
+  }
+}
