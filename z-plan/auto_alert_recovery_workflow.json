@@ -1,0 +1,234 @@
+{
+  "name": "auto_alert_recovery",
+  "version": 1,
+  "description": "Automated alert triage and recovery: ingests an alert, uses AI to analyze and investigate it with vector DB runbook search, assesses risk, then routes HIGH/MEDIUM to human review and LOW to AI auto-execution, followed by action execution and verification.",
+  "schemaVersion": 2,
+  "ownerEmail": "kilicapeto@gmail.com",
+  "timeoutSeconds": 3600,
+  "timeoutPolicy": "TIME_OUT_WF",
+  "restartable": true,
+  "inputParameters": [
+    "alertname",
+    "alert_source",
+    "alert_payload",
+    "alert_severity",
+    "alert_timestamp",
+    "llm_provider",
+    "llm_model",
+    "embedding_model",
+    "vector_db_provider",
+    "vector_db_namespace",
+    "vector_db_index"
+  ],
+  "outputParameters": {
+    "alertname": "${alert_normalizer_ref.output.result.alertname}",
+    "risk_level": "${risk_assessment_ref.output.result.risk_level}",
+    "action_taken": "${execute_action_ref.output.action_taken}",
+    "verification_status": "${verification_ref.output.result.status}",
+    "resolution_summary": "${verification_ref.output.result.summary}"
+  },
+  "tasks": [
+    {
+      "name": "alert_normalizer",
+      "taskReferenceName": "alert_normalizer_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "description": "Normalize and enrich the raw alert payload into a structured format",
+      "inputParameters": {
+        "llmProvider": "${workflow.input.llm_provider}",
+        "model": "${workflow.input.llm_model}",
+        "temperature": 0.1,
+        "maxTokens": 800,
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are an alert normalization engine. You receive raw AlertManager payloads and normalize them into a structured format. Parse the input and return a JSON object with exactly these fields: source (string), alertname (string), alert_severity (string: critical|high|medium|low|info), affected_instances (array of strings), status (string: firing|resolved), summary (string, one sentence), description (string, detailed description combining all alert annotations), startsAt (string, ISO timestamp of first alert), k8s_info (object containing: cluster, namespace), promql (string, extract the PromQL expression from the generatorURL of the first alert by URL-decoding the g0.expr query parameter; empty string if not present)."
+          },
+          {
+            "role": "user",
+            "message": "Source: ${workflow.input.alert_source}\nRaw AlertManager Payload:\n${workflow.input.alert_payload}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "analyze_alert",
+      "taskReferenceName": "analyze_alert_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "description": "AI-powered alert analysis to extract intent, affected components, and urgency",
+      "inputParameters": {
+        "llmProvider": "${workflow.input.llm_provider}",
+        "model": "${workflow.input.llm_model}",
+        "temperature": 0.2,
+        "maxTokens": 1000,
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are an SRE expert. Analyze the incoming alert and extract: alert type, affected service, potential root cause, and urgency. Respond in JSON with fields: alert_type, affected_service, potential_root_cause, urgency, summary."
+          },
+          {
+            "role": "user",
+            "message": "Alert Name: ${alert_normalizer_ref.output.result.alertname}\nSource: ${alert_normalizer_ref.output.result.source}\nPayload: ${alert_normalizer_ref.output.result}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "doc_search",
+      "taskReferenceName": "doc_search_ref",
+      "type": "LLM_SEARCH_INDEX",
+      "description": "Search vector DB for relevant runbooks and past incident reports",
+      "optional": true,
+      "inputParameters": {
+        "vectorDB": "${workflow.input.vector_db_provider}",
+        "namespace": "${workflow.input.vector_db_namespace}",
+        "index": "${workflow.input.vector_db_index}",
+        "query": "${analyze_alert_ref.output.result.summary}",
+        "llmMaxResults": 5,
+        "embeddingModelProvider": "${workflow.input.llm_provider}",
+        "embeddingModel": "${workflow.input.embedding_model}"
+      }
+    },
+    {
+      "name": "investigation",
+      "taskReferenceName": "investigation_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "description": "Deep root-cause analysis combining alert analysis with retrieved runbooks",
+      "inputParameters": {
+        "llmProvider": "${workflow.input.llm_provider}",
+        "model": "${workflow.input.llm_model}",
+        "temperature": 0.2,
+        "maxTokens": 2000,
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are a senior SRE performing incident investigation. Based on the alert analysis and retrieved runbooks, determine the likely root cause and recommended remediation steps. Respond in JSON with fields: root_cause, confidence_score (0-1), recommended_actions (array of strings), estimated_impact, affected_systems (array of strings)."
+          },
+          {
+            "role": "user",
+            "message": "Alert Analysis: ${analyze_alert_ref.output.result}\nRelevant Runbooks: ${doc_search_ref.output.result}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "risk_assessment",
+      "taskReferenceName": "risk_assessment_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "description": "Assess the risk level of the proposed remediation: HIGH, MEDIUM, or LOW",
+      "inputParameters": {
+        "llmProvider": "${workflow.input.llm_provider}",
+        "model": "${workflow.input.llm_model}",
+        "temperature": 0.1,
+        "maxTokens": 800,
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are a risk assessment engine for SRE operations. Given an incident investigation report, determine the risk level of the proposed remediation. Risk levels: HIGH (potential data loss, production outage, or irreversible action), MEDIUM (service degradation possible, rollback is complex), LOW (safe rollback, isolated scope, well-tested procedure). Respond in JSON with fields: risk_level (HIGH|MEDIUM|LOW), risk_reason, auto_executable (boolean), requires_human_approval (boolean)."
+          },
+          {
+            "role": "user",
+            "message": "Investigation Report: ${investigation_ref.output.result}\nAlert Severity: ${alert_normalizer_ref.output.result.alert_severity}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "decision_router",
+      "taskReferenceName": "decision_router_ref",
+      "type": "SWITCH",
+      "description": "Route to human review (HIGH/MEDIUM risk) or AI auto-execute (LOW risk)",
+      "evaluatorType": "javascript",
+      "expression": "function evaluate() { var risk = $.risk_level; if (risk === 'HIGH' || risk === 'MEDIUM') { return 'HUMAN_REVIEW'; } return 'AUTO_EXECUTE'; } evaluate();",
+      "inputParameters": {
+        "risk_level": "${risk_assessment_ref.output.result.risk_level}"
+      },
+      "decisionCases": {
+        "HUMAN_REVIEW": [
+          {
+            "name": "human_review",
+            "taskReferenceName": "human_review_ref",
+            "type": "HUMAN",
+            "description": "Human operator reviews the investigation findings and approves or modifies the remediation plan",
+            "inputParameters": {
+              "alertname": "${alert_normalizer_ref.output.result.alertname}",
+              "risk_level": "${risk_assessment_ref.output.result.risk_level}",
+              "risk_reason": "${risk_assessment_ref.output.result.risk_reason}",
+              "root_cause": "${investigation_ref.output.result.root_cause}",
+              "recommended_actions": "${investigation_ref.output.result.recommended_actions}",
+              "affected_systems": "${investigation_ref.output.result.affected_systems}",
+              "estimated_impact": "${investigation_ref.output.result.estimated_impact}"
+            }
+          }
+        ]
+      },
+      "defaultCase": [
+        {
+          "name": "ai_auto_execute",
+          "taskReferenceName": "ai_auto_execute_ref",
+          "type": "LLM_CHAT_COMPLETE",
+          "description": "AI selects the safest remediation action for low-risk automated execution",
+          "inputParameters": {
+            "llmProvider": "${workflow.input.llm_provider}",
+            "model": "${workflow.input.llm_model}",
+            "temperature": 0.1,
+            "maxTokens": 1000,
+            "messages": [
+              {
+                "role": "system",
+                "message": "You are an automated remediation system. Select the safest and most appropriate action from the recommended actions list. Output a JSON execution plan with fields: selected_action, action_parameters (object), rollback_plan, approval_status (set to 'AUTO_APPROVED')."
+              },
+              {
+                "role": "user",
+                "message": "Investigation Report: ${investigation_ref.output.result}\nRisk Assessment: ${risk_assessment_ref.output.result}"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "join_review",
+      "taskReferenceName": "join_review_ref",
+      "type": "EXCLUSIVE_JOIN",
+      "description": "Wait for whichever review branch completed (human or AI auto)",
+      "joinOn": [
+        "human_review_ref",
+        "ai_auto_execute_ref"
+      ],
+      "defaultExclusiveJoinTask": ["human_review_ref"]
+    },
+    {
+      "name": "execute_action",
+      "taskReferenceName": "execute_action_ref",
+      "type": "SIMPLE",
+      "description": "Execute the approved remediation action against the target system",
+      "inputParameters": {
+        "alertname": "${alert_normalizer_ref.output.result.alertname}",
+        "action_plan": "${join_review_ref.output}",
+        "affected_systems": "${investigation_ref.output.result.affected_systems}"
+      }
+    },
+    {
+      "name": "verification",
+      "taskReferenceName": "verification_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "description": "Verify whether the remediation resolved the alert",
+      "inputParameters": {
+        "llmProvider": "${workflow.input.llm_provider}",
+        "model": "${workflow.input.llm_model}",
+        "temperature": 0.1,
+        "maxTokens": 800,
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are a verification agent for SRE incident resolution. Given the original alert details and the execution results, determine whether the remediation was successful. Respond in JSON with fields: status (RESOLVED|PARTIAL|FAILED), confidence_score (0-1), summary, next_steps (array of strings, empty if RESOLVED)."
+          },
+          {
+            "role": "user",
+            "message": "Original Alert Payload: ${alert_normalizer_ref.output.result}\nAction Taken: ${execute_action_ref.output.result.action_taken}\nExecution Result: ${execute_action_ref.output.result.execution_result}"
+          }
+        ]
+      }
+    }
+  ]
+}

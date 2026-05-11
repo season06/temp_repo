@@ -1,0 +1,39 @@
+{
+  "name": "seed_runbooks",
+  "version": 1,
+  "description": "Index SRE runbook documents into the pgvector store so they can be retrieved by doc_search in auto_alert_recovery.",
+  "schemaVersion": 2,
+  "ownerEmail": "kilicapeto@gmail.com",
+  "restartable": true,
+  "inputParameters": [
+    "llm_provider",
+    "embedding_model",
+    "vector_db_provider",
+    "vector_db_namespace",
+    "vector_db_index",
+    "runbook_text",
+    "runbook_id"
+  ],
+  "outputParameters": {
+    "runbook_id": "${workflow.input.runbook_id}",
+    "index": "${workflow.input.vector_db_index}",
+    "namespace": "${workflow.input.vector_db_namespace}"
+  },
+  "tasks": [
+    {
+      "name": "index_runbook",
+      "taskReferenceName": "index_runbook_ref",
+      "type": "LLM_INDEX_TEXT",
+      "description": "Embed and store a runbook document in the vector DB",
+      "inputParameters": {
+        "vectorDB": "${workflow.input.vector_db_provider}",
+        "namespace": "${workflow.input.vector_db_namespace}",
+        "index": "${workflow.input.vector_db_index}",
+        "embeddingModelProvider": "${workflow.input.llm_provider}",
+        "embeddingModel": "${workflow.input.embedding_model}",
+        "text": "${workflow.input.runbook_text}",
+        "docId": "${workflow.input.runbook_id}"
+      }
+    }
+  ]
+}
