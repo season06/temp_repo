@@ -21,7 +21,7 @@
     "vector_db_index"
   ],
   "outputParameters": {
-    "alertname": "${alert_normalizer_ref.output.result.alertname}",
+    "alertname": "${alert_ingestion_ref.output.result.alertname}",
     "risk_level": "${risk_assessment_ref.output.result.risk_level}",
     "action_taken": "${execute_action_ref.output.action_taken}",
     "verification_status": "${verification_ref.output.result.status}",
@@ -29,8 +29,8 @@
   },
   "tasks": [
     {
-      "name": "alert_normalizer",
-      "taskReferenceName": "alert_normalizer_ref",
+      "name": "alert_ingestion",
+      "taskReferenceName": "alert_ingestion_ref",
       "type": "LLM_CHAT_COMPLETE",
       "description": "Normalize and enrich the raw alert payload into a structured format",
       "inputParameters": {
@@ -67,7 +67,7 @@
           },
           {
             "role": "user",
-            "message": "Alert Name: ${alert_normalizer_ref.output.result.alertname}\nSource: ${alert_normalizer_ref.output.result.source}\nPayload: ${alert_normalizer_ref.output.result}"
+            "message": "Alert Name: ${alert_ingestion_ref.output.result.alertname}\nSource: ${alert_ingestion_ref.output.result.source}\nPayload: ${alert_ingestion_ref.output.result}"
           }
         ]
       }
@@ -127,7 +127,7 @@
           },
           {
             "role": "user",
-            "message": "Investigation Report: ${investigation_ref.output.result}\nAlert Severity: ${alert_normalizer_ref.output.result.alert_severity}"
+            "message": "Investigation Report: ${investigation_ref.output.result}\nAlert Severity: ${alert_ingestion_ref.output.result.alert_severity}"
           }
         ]
       }
@@ -150,7 +150,7 @@
             "type": "HUMAN",
             "description": "Human operator reviews the investigation findings and approves or modifies the remediation plan",
             "inputParameters": {
-              "alertname": "${alert_normalizer_ref.output.result.alertname}",
+              "alertname": "${alert_ingestion_ref.output.result.alertname}",
               "risk_level": "${risk_assessment_ref.output.result.risk_level}",
               "risk_reason": "${risk_assessment_ref.output.result.risk_reason}",
               "root_cause": "${investigation_ref.output.result.root_cause}",
@@ -203,7 +203,7 @@
       "type": "SIMPLE",
       "description": "Execute the approved remediation action against the target system",
       "inputParameters": {
-        "alertname": "${alert_normalizer_ref.output.result.alertname}",
+        "alertname": "${alert_ingestion_ref.output.result.alertname}",
         "action_plan": "${join_review_ref.output}",
         "affected_systems": "${investigation_ref.output.result.affected_systems}"
       }
@@ -225,7 +225,7 @@
           },
           {
             "role": "user",
-            "message": "Original Alert Payload: ${alert_normalizer_ref.output.result}\nAction Taken: ${execute_action_ref.output.result.action_taken}\nExecution Result: ${execute_action_ref.output.result.execution_result}"
+            "message": "Original Alert Payload: ${alert_ingestion_ref.output.result}\nAction Taken: ${execute_action_ref.output.action_taken}\nExecution Result: ${execute_action_ref.output.execution_result}\nContainer Status After Action: ${execute_action_ref.output.container_status_after}"
           }
         ]
       }
