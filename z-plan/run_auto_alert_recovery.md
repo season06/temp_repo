@@ -27,7 +27,8 @@ curl -X POST http://localhost:8000/api/workflow/execute/auto_alert_recovery/1 \
       "embedding_model": "text-embedding-3-small",
       "vector_db_provider": "pgvector-local",
       "vector_db_namespace": "runbooks",
-      "vector_db_index": "incidents"
+      "vector_db_index": "incidents",
+      "recipient_email": "oncall@example.com"
     }
   }'
 ```
@@ -53,7 +54,8 @@ print(json.dumps({
     'embedding_model': 'text-embedding-3-small',
     'vector_db_provider': 'pgvector-local',
     'vector_db_namespace': 'runbooks',
-    'vector_db_index': 'incidents'
+    'vector_db_index': 'incidents',
+    'recipient_email': 'oncall@example.com'
   }
 }))
 ")"
@@ -73,6 +75,7 @@ print(json.dumps({
 | `vector_db_provider`   | yes      | Registered vector DB name (e.g. `pgvector-local`) |
 | `vector_db_namespace`  | yes      | Namespace in the vector DB (e.g. `runbooks`) |
 | `vector_db_index`      | yes      | Index/table name (e.g. `incidents`) |
+| `recipient_email`      | yes      | Email address to receive the alert report |
 
 ---
 
@@ -111,17 +114,21 @@ for t in w.get('tasks', []):
 ## Expected Task Flow
 
 ```
-[COMPLETED    ] alert_normalizer_ref  (LLM_CHAT_COMPLETE)   ← normalize AlertManager payload
-[COMPLETED    ] analyze_alert_ref     (LLM_CHAT_COMPLETE)   ← extract type, service, root cause
-[COMPLETED    ] doc_search_ref        (LLM_SEARCH_INDEX)    ← retrieve matching runbooks
-[COMPLETED    ] investigation_ref     (LLM_CHAT_COMPLETE)   ← root cause + recommended actions
-[COMPLETED    ] risk_assessment_ref   (LLM_CHAT_COMPLETE)   ← HIGH | MEDIUM | LOW
-[COMPLETED    ] decision_router_ref   (SWITCH)
-    ├─ HIGH/MEDIUM → [IN_PROGRESS ] human_review_ref  (HUMAN)          ← workflow pauses
+[COMPLETED    ] alert_ingestion_ref        (LLM_CHAT_COMPLETE)   ← normalize AlertManager payload
+[COMPLETED    ] analyze_alert_ref          (LLM_CHAT_COMPLETE)   ← extract type, service, root cause
+[COMPLETED    ] doc_search_ref             (LLM_SEARCH_INDEX)    ← retrieve matching runbooks
+[COMPLETED    ] investigation_ref          (LLM_CHAT_COMPLETE)   ← root cause + recommended actions
+[COMPLETED    ] risk_assessment_ref        (LLM_CHAT_COMPLETE)   ← HIGH | MEDIUM | LOW
+[COMPLETED    ] decision_router_ref        (SWITCH)
+    ├─ HIGH/MEDIUM → [IN_PROGRESS ] human_review_ref  (HUMAN)   ← workflow pauses
     └─ LOW         → [COMPLETED   ] ai_auto_execute_ref (LLM_CHAT_COMPLETE)
-[COMPLETED    ] join_review_ref       (EXCLUSIVE_JOIN)
-[SCHEDULED    ] execute_action_ref    (SIMPLE)               ← needs kubectl worker
-[COMPLETED    ] verification_ref      (LLM_CHAT_COMPLETE)
+[COMPLETED    ] join_review_ref            (EXCLUSIVE_JOIN)
+[COMPLETED    ] trigger_action_workflow_ref (START_WORKFLOW)     ← fires alert_action_executor
+[COMPLETED    ] verification_ref           (LLM_CHAT_COMPLETE)   ← confirms trigger
+
+── alert_action_executor sub-workflow ──────────────────────────────────────────
+[COMPLETED    ] generate_report_ref        (LLM_CHAT_COMPLETE)   ← builds email subject + body
+[COMPLETED    ] send_alert_mail_ref        (SIMPLE)              ← sends email to recipient
 ```
 
 ---
@@ -141,7 +148,7 @@ for t in w['tasks']:
         print(t['taskId'])
 ")
 
-# 2. Approve with selected action
+# 2. Approve and continue
 curl -X POST http://localhost:8000/api/tasks \
   -H "Content-Type: application/json" \
   -d "{
@@ -149,11 +156,36 @@ curl -X POST http://localhost:8000/api/tasks \
     \"status\": \"COMPLETED\",
     \"outputData\": {
       \"approved\": true,
-      \"selected_action\": \"kubectl scale deployment/web-server --replicas=6 -n production\",
+      \"selected_action\": \"docker restart payment-api\",
       \"approved_by\": \"oncall-engineer@company.com\",
-      \"approval_note\": \"Scaling out to handle traffic spike\"
+      \"approval_note\": \"Memory leak confirmed, safe to restart\"
     }
   }"
+```
+
+---
+
+## Check the Action Sub-Workflow
+
+After `trigger_action_workflow_ref` completes, get the sub-workflow ID from the parent:
+
+```bash
+ACTION_WF_ID=$(curl -s http://localhost:8000/api/workflow/<workflowId> | \
+  python3 -c "
+import json, sys
+w = json.load(sys.stdin)
+for t in w['tasks']:
+    if t['referenceTaskName'] == 'trigger_action_workflow_ref':
+        print(t.get('outputData', {}).get('workflowId', ''))
+")
+
+curl -s http://localhost:8000/api/workflow/$ACTION_WF_ID | python3 -c "
+import json, sys
+w = json.load(sys.stdin)
+print('sub-workflow status:', w['status'])
+for t in w.get('tasks', []):
+    print(f'  [{t[\"status\"]:14}] {t[\"referenceTaskName\"]} ({t[\"taskType\"]})')
+"
 ```
 
 ---
@@ -163,7 +195,7 @@ curl -X POST http://localhost:8000/api/tasks \
 Before running, ensure runbooks are seeded:
 
 ```bash
-# See z-plan/seed_runbooks_docs.md for full examples
+# See z-plan/seed_vectordb/seed_runbooks_docs.md for full examples
 curl -X POST http://localhost:8000/api/workflow/execute/seed_runbooks/1 \
   -H "Content-Type: application/json" \
   -d '{ "name": "seed_runbooks", "version": 1, "input": { ... } }'

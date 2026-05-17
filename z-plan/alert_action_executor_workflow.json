@@ -1,0 +1,72 @@
+{
+  "name": "alert_action_executor",
+  "version": 1,
+  "description": "Action sub-workflow triggered by auto_alert_recovery. Scenario: send-mail — generates a structured alert event report and POSTs it to a mock mail endpoint (httpbin.org/post for POC).",
+  "schemaVersion": 2,
+  "ownerEmail": "kilicapeto@gmail.com",
+  "timeoutSeconds": 300,
+  "timeoutPolicy": "TIME_OUT_WF",
+  "restartable": true,
+  "inputParameters": [
+    "alertname",
+    "alert_data",
+    "analysis",
+    "investigation",
+    "risk_assessment",
+    "review_outcome",
+    "recipient_email",
+    "llm_provider",
+    "llm_model"
+  ],
+  "outputParameters": {
+    "alertname": "${workflow.input.alertname}",
+    "report": "${generate_report_ref.output.result}",
+    "mail_status_code": "${send_alert_mail_ref.output.response.statusCode}"
+  },
+  "tasks": [
+    {
+      "name": "generate_report",
+      "taskReferenceName": "generate_report_ref",
+      "type": "LLM_CHAT_COMPLETE",
+      "description": "Generate a structured alert event report to be delivered as the email body",
+      "inputParameters": {
+        "llmProvider": "${workflow.input.llm_provider}",
+        "model": "${workflow.input.llm_model}",
+        "temperature": 0.2,
+        "maxTokens": 1500,
+        "messages": [
+          {
+            "role": "system",
+            "message": "You are an SRE reporting agent. Generate a structured alert event report that will be sent as an email. Respond in JSON with fields: subject (string, email subject line starting with severity in brackets, e.g. '[CRITICAL] ...'), body (string, full plain-text email body with clearly separated sections: Alert Summary, Root Cause Analysis, Risk Assessment, Recommended Actions, Review Outcome), escalation_needed (boolean)."
+          },
+          {
+            "role": "user",
+            "message": "Alert Data: ${workflow.input.alert_data}\nAnalysis: ${workflow.input.analysis}\nInvestigation: ${workflow.input.investigation}\nRisk Assessment: ${workflow.input.risk_assessment}\nReview Outcome: ${workflow.input.review_outcome}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "send_alert_mail",
+      "taskReferenceName": "send_alert_mail_ref",
+      "type": "HTTP",
+      "description": "Mock mail send via httpbin.org/post — replace URI with real mail API for production",
+      "inputParameters": {
+        "http_request": {
+          "uri": "https://httpbin.org/post",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json",
+            "X-Alert-Name": "${workflow.input.alertname}"
+          },
+          "body": {
+            "to": "${workflow.input.recipient_email}",
+            "subject": "${generate_report_ref.output.result.subject}",
+            "body": "${generate_report_ref.output.result.body}",
+            "escalation_needed": "${generate_report_ref.output.result.escalation_needed}"
+          }
+        }
+      }
+    }
+  ]
+}

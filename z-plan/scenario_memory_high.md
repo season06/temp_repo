@@ -1,26 +1,26 @@
-# Scenario: HighMemoryUsage → docker restart
+# POC Scenario: OOM / HighMemoryUsage → send alert report email
 
 ## Overview
 
 | Field | Value |
 |---|---|
-| Alert | HighMemoryUsage — container `payment-api` at 92% memory for 10 min |
+| Alert | HighMemoryUsage — container `payment-api` at 92% memory (OOM imminent) |
 | Alert source | AlertManager (`alert_payload.json`) |
-| Runbook action | `docker restart payment-api` |
 | Risk level | HIGH → human review required |
-| Execution | `execute_action_worker.py` runs the approved docker command |
+| Action | `alert_action_executor` generates event report and sends email |
+| Mail mock | HTTP POST to `https://httpbin.org/post` (no worker needed) |
 
 ---
 
-## Step 0 — Setup
+## Step 0 — Setup (one-time)
 
-### 0-1. Start a test container (safe to restart)
+### 0-1. Register task definitions
 
 ```bash
-docker run -d --name payment-api alpine sleep infinity
+# No custom workers needed for this POC — send_alert_mail uses HTTP task
 ```
 
-### 0-2. Seed the memory high runbook
+### 0-2. Seed the OOM runbook
 
 ```bash
 curl -X POST http://localhost:8000/api/workflow/execute/seed_runbooks/1 \
@@ -35,26 +35,23 @@ curl -X POST http://localhost:8000/api/workflow/execute/seed_runbooks/1 \
       "vector_db_namespace": "runbooks",
       "vector_db_index": "incidents",
       "runbook_id": "runbook_high_memory_usage",
-      "runbook_text": "Runbook: HighMemoryUsage\nSymptom: Container memory usage above 90% for more than 10 minutes. Possible memory leak.\nResolution:\n  1. Check current memory usage: docker stats <container> --no-stream\n  2. Inspect container logs for OOM indicators: docker logs --tail=100 <container>\n  3. If memory leak confirmed: restart the container to reclaim memory: docker restart <container>\n  4. Monitor memory after restart: docker stats <container> --no-stream\nRisk: HIGH - restarting a production container causes brief downtime."
+      "runbook_text": "Runbook: HighMemoryUsage / OOM\nSymptom: Container memory usage above 90% for more than 10 minutes. OOM kill imminent.\nResolution:\n  1. Check current memory usage: docker stats <container> --no-stream\n  2. Inspect container logs for OOM indicators: docker logs --tail=100 <container>\n  3. If memory leak confirmed: restart the container to reclaim memory: docker restart <container>\n  4. Monitor memory after restart: docker stats <container> --no-stream\nRisk: HIGH - restarting a production container causes brief downtime."
     }
   }'
 ```
 
-### 0-3. Start the execute_action worker
+### 0-3. Register the workflows
 
 ```bash
-cd z-plan
-pip install requests   # one-time
-python3 execute_action_worker.py
-```
+# Register action sub-workflow first
+curl -X POST http://localhost:8000/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d @z-plan/alert_action_executor_workflow.json
 
-Worker output on start:
-```
-execute_action worker ready
-  Conductor : http://localhost:8000
-  Task type : execute_action
-  Worker ID : execute-action-worker-01
-  Allowed   : docker restart <container>
+# Register main workflow
+curl -X POST http://localhost:8000/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d @z-plan/auto_alert_recovery_workflow.json
 ```
 
 ---
@@ -78,57 +75,54 @@ print(json.dumps({
     'embedding_model': 'text-embedding-3-small',
     'vector_db_provider': 'pgvector-local',
     'vector_db_namespace': 'runbooks',
-    'vector_db_index': 'incidents'
+    'vector_db_index': 'incidents',
+    'recipient_email': 'kilicapeto@gmail.com'
   }
 }))
 ")"
 ```
 
----
-
-## Expected Task Flow
-
-```
-[COMPLETED] alert_ingestion_ref  (LLM_CHAT_COMPLETE)
-              alertname: HighMemoryUsage
-              alert_severity: critical
-              affected_instances: ["docker-host-01"]
-              promql: container_memory_usage_bytes{container="payment-api"} / ... > 0.9
-
-[COMPLETED] analyze_alert_ref    (LLM_CHAT_COMPLETE)
-              alert_type: HighMemoryUsage
-              affected_service: payment-api
-              potential_root_cause: Memory leak in payment-api container
-              urgency: critical
-
-[COMPLETED] doc_search_ref       (LLM_SEARCH_INDEX)
-              result: [Runbook: HighMemoryUsage → docker restart <container>]
-
-[COMPLETED] investigation_ref    (LLM_CHAT_COMPLETE)
-              root_cause: Memory leak causing container to approach OOM limit
-              recommended_actions: ["docker restart payment-api"]
-              confidence_score: 0.85
-
-[COMPLETED] risk_assessment_ref  (LLM_CHAT_COMPLETE)
-              risk_level: HIGH
-              risk_reason: Restarting production container causes brief downtime
-              requires_human_approval: true
-
-[COMPLETED] decision_router_ref  (SWITCH)
-              → HUMAN_REVIEW
-
-[IN_PROGRESS] human_review_ref   (HUMAN)   ← workflow pauses here
-```
-
----
-
-## Step 2 — Complete the human review
-
-### 2-1. Get the human_review task ID
+Save the returned `workflowId`:
 
 ```bash
-WF_ID=<your-workflow-id>
+WF_ID=<workflowId from response>
+```
 
+---
+
+## Step 2 — Main workflow runs (automatic)
+
+```
+[COMPLETED] alert_ingestion_ref   alertname: HighMemoryUsage
+                                  alert_severity: critical
+                                  summary: "High memory usage on payment-api (92%)"
+
+[COMPLETED] analyze_alert_ref     alert_type: HighMemoryUsage
+                                  affected_service: payment-api
+                                  potential_root_cause: Memory leak approaching OOM
+                                  urgency: critical
+
+[COMPLETED] doc_search_ref        Retrieved: Runbook HighMemoryUsage/OOM
+
+[COMPLETED] investigation_ref     root_cause: Memory leak — container approaching OOM limit
+                                  confidence_score: 0.87
+                                  recommended_actions: ["docker restart payment-api"]
+                                  affected_systems: ["payment-api"]
+
+[COMPLETED] risk_assessment_ref   risk_level: HIGH
+                                  risk_reason: Restarting production container causes brief downtime
+                                  requires_human_approval: true
+
+[COMPLETED] decision_router_ref   → HUMAN_REVIEW
+
+[IN_PROGRESS] human_review_ref    ← workflow pauses here
+```
+
+---
+
+## Step 3 — Complete the human review
+
+```bash
 TASK_ID=$(curl -s http://localhost:8000/api/workflow/$WF_ID | python3 -c "
 import json, sys
 w = json.load(sys.stdin)
@@ -136,12 +130,7 @@ for t in w['tasks']:
     if t['referenceTaskName'] == 'human_review_ref':
         print(t['taskId'])
 ")
-echo "task ID: $TASK_ID"
-```
 
-### 2-2. Approve the restart action
-
-```bash
 curl -X POST http://localhost:8000/api/tasks \
   -H "Content-Type: application/json" \
   -d "{
@@ -149,83 +138,98 @@ curl -X POST http://localhost:8000/api/tasks \
     \"status\": \"COMPLETED\",
     \"outputData\": {
       \"approved\": true,
-      \"selected_action\": \"docker restart payment-api\",
-      \"approved_by\": \"oncall-engineer@company.com\",
-      \"approval_note\": \"Memory leak confirmed in logs, safe to restart during low-traffic window\"
+      \"note\": \"OOM risk confirmed — schedule restart during next maintenance window\",
+      \"approved_by\": \"oncall@example.com\"
     }
   }"
 ```
 
 ---
 
-## Step 3 — Worker executes the action
+## Step 4 — Action sub-workflow: generate report + mock mail
 
-The `execute_action_worker.py` picks up the `execute_action` task, validates the command, and runs:
+After human review completes:
+
+```
+[COMPLETED] join_review_ref
+[COMPLETED] trigger_action_workflow_ref   workflowId: <action-wf-id>
+[COMPLETED] verification_ref              status: TRIGGERED
+```
+
+Sub-workflow (`alert_action_executor`) runs:
+
+```
+[COMPLETED] generate_report_ref   (LLM_CHAT_COMPLETE)
+              subject: "[CRITICAL] HighMemoryUsage — payment-api OOM risk on prod-cluster"
+              body:
+                Alert Summary
+                =============
+                Alert:     HighMemoryUsage
+                Severity:  critical
+                Container: payment-api (docker-host-01)
+                Memory:    92% (3.68GB / 4GB) for >10 minutes
+                Status:    firing since 2026-05-13T09:00:00Z
+
+                Root Cause Analysis
+                ===================
+                Memory leak detected — container is approaching OOM limit.
+                Confidence: 87%
+                Affected systems: payment-api
+
+                Risk Assessment
+                ===============
+                Risk Level: HIGH
+                Reason: Restarting production container causes brief downtime.
+
+                Recommended Actions
+                ===================
+                1. docker restart payment-api
+
+                Review Outcome
+                ==============
+                Approved by: oncall@example.com
+                Note: OOM risk confirmed — schedule restart during next maintenance window
+
+[COMPLETED] send_alert_mail_ref   (HTTP → httpbin.org/post)
+              response.statusCode: 200
+              → mock confirms payload received
+```
+
+---
+
+## Step 5 — Inspect the mock mail payload
 
 ```bash
-docker restart payment-api
-```
+ACTION_WF_ID=$(curl -s http://localhost:8000/api/workflow/$WF_ID | python3 -c "
+import json, sys
+w = json.load(sys.stdin)
+for t in w['tasks']:
+    if t['referenceTaskName'] == 'trigger_action_workflow_ref':
+        print(t.get('outputData', {}).get('workflowId', ''))
+")
 
-Then checks container status:
-```bash
-docker inspect --format {{.State.Status}} payment-api
-# → running
-```
-
-Worker logs:
-```
-[<task-id>] received task
-[<task-id>] action_plan: {"approved": true, "selected_action": "docker restart payment-api", ...}
-[<task-id>] executing: docker restart payment-api
-[<task-id>] done — status=COMPLETED, container=running
-```
-
-Task output written back to Conductor:
-```json
-{
-  "action_taken": "docker restart payment-api",
-  "execution_result": "payment-api",
-  "exit_code": 0,
-  "container_name": "payment-api",
-  "container_status_after": "running",
-  "success": true
-}
+curl -s http://localhost:8000/api/workflow/$ACTION_WF_ID | python3 -c "
+import json, sys
+w = json.load(sys.stdin)
+print('sub-workflow status:', w['status'])
+for t in w.get('tasks', []):
+    if t['referenceTaskName'] == 'generate_report_ref':
+        r = t.get('outputData', {}).get('result', {})
+        print()
+        print('=== EMAIL THAT WOULD BE SENT ===')
+        print('To:     ', w['input']['recipient_email'])
+        print('Subject:', r.get('subject'))
+        print()
+        print(r.get('body', ''))
+"
 ```
 
 ---
 
-## Step 4 — Verification
+## What to replace for production
 
-```
-[COMPLETED] verification_ref     (LLM_CHAT_COMPLETE)
-              status: RESOLVED
-              confidence_score: 0.95
-              summary: Container payment-api restarted successfully and is running.
-                       Memory usage reset. No further action required.
-              next_steps: []
-```
-
----
-
-## Worker Safety Rules
-
-The worker only accepts commands matching exactly:
-
-```
-docker restart <container-name>
-```
-
-Any other command (e.g. `docker rm`, `kubectl delete`, shell injection) is rejected with `FAILED` status before execution.
-
----
-
-## Files
-
-| File | Description |
-|---|---|
-| `alert_payload.json` | AlertManager webhook payload — HighMemoryUsage, container payment-api |
-| `auto_alert_recovery_workflow.json` | Workflow definition |
-| `execute_action_worker.py` | Worker that polls and runs docker restart |
-| `seed_runbooks_workflow.json` | Workflow to index runbooks into pgvector |
-| `seed_runbooks_docs.md` | Runbook seeding reference with examples |
-| `run_auto_alert_recovery.md` | How to start the workflow with curl |
+| Component | POC | Production |
+|---|---|---|
+| `send_alert_mail` task type | `HTTP` → `httpbin.org/post` | `HTTP` → SendGrid / Mailgun / SES API |
+| Authentication | none | `Authorization: Bearer <api-key>` header |
+| No other changes needed | — | — |

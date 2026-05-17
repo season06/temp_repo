@@ -1,7 +1,7 @@
 {
   "name": "auto_alert_recovery",
   "version": 1,
-  "description": "Automated alert triage and recovery: ingests an alert, uses AI to analyze and investigate it with vector DB runbook search, assesses risk, then routes HIGH/MEDIUM to human review and LOW to AI auto-execution, followed by action execution and verification.",
+  "description": "Automated alert triage and recovery: ingests an alert, uses AI to analyze and investigate it with vector DB runbook search, assesses risk, routes HIGH/MEDIUM to human review and LOW to AI auto-execution, then always triggers an action sub-workflow.",
   "schemaVersion": 2,
   "ownerEmail": "kilicapeto@gmail.com",
   "timeoutSeconds": 3600,
@@ -18,12 +18,13 @@
     "embedding_model",
     "vector_db_provider",
     "vector_db_namespace",
-    "vector_db_index"
+    "vector_db_index",
+    "recipient_email"
   ],
   "outputParameters": {
     "alertname": "${alert_ingestion_ref.output.result.alertname}",
     "risk_level": "${risk_assessment_ref.output.result.risk_level}",
-    "action_taken": "${execute_action_ref.output.action_taken}",
+    "action_workflow_id": "${trigger_action_workflow_ref.output.workflowId}",
     "verification_status": "${verification_ref.output.result.status}",
     "resolution_summary": "${verification_ref.output.result.summary}"
   },
@@ -198,34 +199,46 @@
       "defaultExclusiveJoinTask": ["human_review_ref"]
     },
     {
-      "name": "execute_action",
-      "taskReferenceName": "execute_action_ref",
-      "type": "SIMPLE",
-      "description": "Execute the approved remediation action against the target system",
+      "name": "trigger_action_workflow",
+      "taskReferenceName": "trigger_action_workflow_ref",
+      "type": "START_WORKFLOW",
+      "description": "Always trigger the alert_action_executor sub-workflow to handle the response action",
       "inputParameters": {
-        "alertname": "${alert_ingestion_ref.output.result.alertname}",
-        "action_plan": "${join_review_ref.output}",
-        "affected_systems": "${investigation_ref.output.result.affected_systems}"
+        "startWorkflow": {
+          "name": "alert_action_executor",
+          "version": 1,
+          "input": {
+            "alertname": "${alert_ingestion_ref.output.result.alertname}",
+            "alert_data": "${alert_ingestion_ref.output.result}",
+            "analysis": "${analyze_alert_ref.output.result}",
+            "investigation": "${investigation_ref.output.result}",
+            "risk_assessment": "${risk_assessment_ref.output.result}",
+            "review_outcome": "${join_review_ref.output}",
+            "recipient_email": "${workflow.input.recipient_email}",
+            "llm_provider": "${workflow.input.llm_provider}",
+            "llm_model": "${workflow.input.llm_model}"
+          }
+        }
       }
     },
     {
       "name": "verification",
       "taskReferenceName": "verification_ref",
       "type": "LLM_CHAT_COMPLETE",
-      "description": "Verify whether the remediation resolved the alert",
+      "description": "Confirm the action sub-workflow was triggered and summarize the triage outcome",
       "inputParameters": {
         "llmProvider": "${workflow.input.llm_provider}",
         "model": "${workflow.input.llm_model}",
         "temperature": 0.1,
-        "maxTokens": 800,
+        "maxTokens": 600,
         "messages": [
           {
             "role": "system",
-            "message": "You are a verification agent for SRE incident resolution. Given the original alert details and the execution results, determine whether the remediation was successful. Respond in JSON with fields: status (RESOLVED|PARTIAL|FAILED), confidence_score (0-1), summary, next_steps (array of strings, empty if RESOLVED)."
+            "message": "You are a verification agent. An action sub-workflow has been triggered to handle an alert. Summarize the triage outcome. Respond in JSON with fields: status (always 'TRIGGERED'), confidence_score (0-1), summary (one sentence confirming the sub-workflow was fired and describing what action it will take), next_steps (array of strings, any follow-up the on-call team should monitor)."
           },
           {
             "role": "user",
-            "message": "Original Alert Payload: ${alert_ingestion_ref.output.result}\nAction Taken: ${execute_action_ref.output.action_taken}\nExecution Result: ${execute_action_ref.output.execution_result}\nContainer Status After Action: ${execute_action_ref.output.container_status_after}"
+            "message": "Alert: ${alert_ingestion_ref.output.result.alertname}\nRisk Level: ${risk_assessment_ref.output.result.risk_level}\nRisk Reason: ${risk_assessment_ref.output.result.risk_reason}\nInvestigation Summary: ${investigation_ref.output.result.root_cause}\nAction Sub-Workflow ID: ${trigger_action_workflow_ref.output.workflowId}"
           }
         ]
       }
