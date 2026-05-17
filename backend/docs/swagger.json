@@ -1,0 +1,188 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Multi-fab plain SQL query interface with SSE streaming. Validates SELECT-only queries, wraps ROWNUM, trial-runs on Test DB, then fans out goroutines per Fab.",
+        "title": "SQL Console API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/api/console/templates": {
+            "get": {
+                "description": "Returns pre-configured SQL templates from context_sqls.yaml.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "templates"
+                ],
+                "summary": "List SQL templates",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/console.SqlTemplate"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/fabs/query": {
+            "post": {
+                "description": "Validates the SQL (SELECT-only), wraps ROWNUM, trial-runs on Test DB, and returns a queryId for SSE streaming.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "query"
+                ],
+                "summary": "Submit SQL query",
+                "parameters": [
+                    {
+                        "description": "Query request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/console.executeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/console.executeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/console.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/fabs/stream/{id}": {
+            "get": {
+                "description": "Opens an SSE stream for the given queryId. Emits fab_result or fab_error events per fab, then a done event.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "query"
+                ],
+                "summary": "Stream query results (SSE)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Query ID returned by POST /api/fabs/query",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/console.errorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "console.SqlParam": {
+            "type": "object",
+            "properties": {
+                "default": {},
+                "label": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "console.SqlTemplate": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "params": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/console.SqlParam"
+                    }
+                },
+                "sql": {
+                    "type": "string"
+                }
+            }
+        },
+        "console.errorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "console.executeRequest": {
+            "type": "object",
+            "properties": {
+                "fabs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "namedParams": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "rowLimit": {
+                    "type": "integer"
+                },
+                "sql": {
+                    "type": "string"
+                }
+            }
+        },
+        "console.executeResponse": {
+            "type": "object",
+            "properties": {
+                "queryId": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

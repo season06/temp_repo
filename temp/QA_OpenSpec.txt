@@ -1,0 +1,556 @@
+ /opsx:explore 新增 feature: 提供一個能讓使用者貼上 plain sql 的介面，用以搜尋全廠區的資料                                                                         
+    - 可選擇情境 SQL，方便使用者因應情境快速查詢的 SQL query                                                                                                        
+    - 需檢查 SQL 語法與效能，避免 DB 瓶頸                                                                                                                           
+
+● 讓我先看看現有的 change 狀態，再一起探索這個想法。
+
+● Bash(openspec list --json 2>/dev/null)
+  ⎿  {
+       "changes": [
+         {
+     … +8 lines (ctrl+o to expand)
+
+  Read 2 files (ctrl+o to expand)
+
+● 很有趣的構想。先讓我把這個 feature 的輪廓拉出來，再一起找出複雜的地方。
+
+  ---
+  這個 feature 實際上在做什麼
+  
+  你描述的其實是一個 SQL Console — 類似 DBeaver / DataGrip 的 query 介面，但有兩個關鍵差異：
+
+  一般 SQL client               這個 feature
+  ──────────────────────────    ──────────────────────────────
+  連一個 DB                      一次打 14 個 Fab 的 DB
+  自己寫 SQL                     + 可選「情境 SQL」範本
+  執行就執行                      + 執行前檢查語法與效能
+
+  這讓我想先問幾件事，因為答案會大幅影響設計方向。
+
+  ---
+  先挖幾個核心問題
+  
+  關於「全廠區」：
+
+  「搜尋全廠區的資料」是什麼意思？
+
+  情境 A：對所有 Fab 執行相同 SQL → 合併結果
+  ──────────────────────────────────────────
+    SQL: SELECT * FROM cpnt WHERE name LIKE :kw
+
+    F12A result ──┐
+    F12B result ──┼──► 合併成一張表顯示 (with fab column)
+    ...           │
+    F23 result ───┘
+
+  情境 B：使用者選「哪些 Fab」，非一定全部
+  ──────────────────────────────────────────
+    ☑ F12A  ☑ F14A  ☐ F16  ☑ SOIC ...
+
+  情境 C：同一 SQL 在不同 Fab 的 schema 不同
+  ──────────────────────────────────────────
+    F12A 的 cpnt table 有 retry_count 欄位
+    F16  的 cpnt table 沒有
+    → 結果如何合併？錯誤如何處理？
+
+  哪個情境最接近你的需求？ 尤其情境 C — 各廠的 Oracle schema 是否保證完全一致？
+
+  ---
+  關於「情境 SQL」：
+
+  這個最有意思。我理解成「預存的 SQL 範本」，使用者選一個就自動填入 editor。
+
+  ┌─────────────────────────────────────────────────────┐
+  │  情境 SQL                                            │
+  │  ─────────────────────────────────────────────────  │
+  │  ○ 查詢最近失敗的 Cpnt（過去 24 小時）              │
+  │  ○ 找出被多個 SOP 共用的 Cpnt                       │
+  │  ○ 列出無 SOP 關聯的孤兒 Cpnt                       │
+  │  ● [自訂]                                           │
+  └─────────────────────────────────────────────────────┘
+
+  幾個問題：
+  - 這些情境 SQL 由誰維護？hardcode 在 config file 還是有「admin 新增範本」的需求？
+  - 情境 SQL 有沒有參數（例如：失敗筆數 > :threshold）？還是純靜態字串？
+
+  ---
+  效能檢查這裡有個張力
+  
+  你說「需檢查 SQL 語法與效能，避免 DB 瓶頸」，但這兩件事的複雜度差很多：
+
+  語法檢查                         效能檢查
+  ──────────────────────────       ──────────────────────────────
+  可以用 sqlfluff 或               需要對 Oracle 執行 EXPLAIN PLAN
+  sql-parse 在 sidecar             → 要連 DB
+  純 parsing，不碰 DB              → 結果因資料量、index 而異
+  快、可即時顯示                    → 慢、且結果要人工判讀
+
+  效能檢查的實際做法選項：
+
+  ┌───────────────────────────────┬─────────────┬───────────────────────────────────────────────────┐
+  │             方式              │    優點     │                       缺點                        │
+  ├───────────────────────────────┼─────────────┼───────────────────────────────────────────────────┤
+  │ EXPLAIN PLAN（連 DB）         │ 最準確      │ 要額外一次 DB 連線；使用者需懂執行計劃            │
+  ├───────────────────────────────┼─────────────┼───────────────────────────────────────────────────┤
+  │ 簡單 heuristic（client-side） │ 快、不連 DB │ 不精確，只能抓明顯問題（如 SELECT *、沒有 WHERE） │
+  ├───────────────────────────────┼─────────────┼───────────────────────────────────────────────────┤
+  │ 設定 row limit / timeout 護欄 │ 最簡單實作  │ 不是「事前」檢查，而是「出問題時」截止            │
+  └───────────────────────────────┴─────────────┴───────────────────────────────────────────────────┘
+
+  你心目中的「效能檢查」比較接近哪種？純粹的護欄（加 ROWNUM 上限）還是真正的 EXPLAIN？
+
+  ---
+  這個 feature 和現有設計的一個衝突
+
+  design.md 目前的安全策略是：
+
+  ▎ SQL injection 風險 → 所有查詢使用 Oracle named parameters，不做字串拼接
+
+  但自由 SQL 介面本質上就是讓使用者輸入任意 SQL。這兩者有矛盾。
+
+  現在的 sidecar 設計:
+    後端 → { sql: "SELECT * FROM cpnt WHERE id = :id", params: {id: "abc"} } → sidecar
+
+  自由 SQL 介面:
+    使用者 → 任意 SQL → 後端 → sidecar → Oracle
+
+  因為是 internal tool（< 20 人）且唯讀，風險可接受。但這個決策值得明確寫進 design，而不是默默接受。
+
+  有幾個問題：
+  - 你們有沒有 Oracle user 權限控制？（sidecar 連 Oracle 的帳號是否只有 SELECT 權限？）
+  - 如果某人貼了一個很重的 SELECT 把 DB 拖慢，有沒有人工介入的機制？
+
+  ---
+  一個我覺得有趣的方向
+  
+  「情境 SQL」這個概念可以做得比「預設範本」更聰明：
+
+  ┌──────────────────────────────────────────────────────────────┐
+  │  情境 SQL 範本                                                │
+  │                                                              │
+  │  [查詢失敗 Cpnt] ← 點選後自動填入 editor，可修改            │
+  │                                                              │
+  │  SELECT c.name, c.api_url, e.error_msg, e.fail_time         │
+  │  FROM cpnt c                                                 │
+  │  JOIN cpnt_execution_log e ON c.id = e.cpnt_id              │
+  │  WHERE e.status = 'FAILED'                                   │
+  │    AND e.fail_time > SYSDATE - :days    ← named param!       │
+  │  ORDER BY e.fail_time DESC                                   │
+  │                                                              │
+  │  參數: days = [  7  ]                                        │
+  └──────────────────────────────────────────────────────────────┘
+
+  情境 SQL 本身可以包含 named parameters — 這樣可以同時保有：
+  - 使用者友好的快速查詢
+  - 後端繼續用 parameterized query，保留安全護欄
+
+  自由輸入的「自訂 SQL」另外走一個「你知道你在做什麼」的路徑。
+
+  這個分層的概念你覺得有道理嗎？
+
+✻ Cogitated for 57s
+
+※ recap: Exploring a new SQL Console feature for querying across all 14 fabs, with context SQL templates and safety guardrails. Next: user needs to answer questions
+   about cross-fab schema consistency, context SQL ownership, and desired level of performance checking. (disable recaps in /config)
+
+❯ 此功能即為 SQL console 沒錯，可讓使用者選擇「哪些 Fab」，並合併成一張表顯示 (with fab column)，所有廠區的 schema 一致。                                           
+  情境 SQL 為預存的 SQL 範本，提供使用者選擇，目前先 hard code 在 config file，但保留未來給 admin 新增的彈性，SQL 內容包含參數 & 純靜態字串都有可能。               
+  SQL 語法檢查使用套件，效能檢查先存取測試 DB 試跑，確保在 timeout 秒數內回傳結果，再存取各廠區正式 DB。                                                            
+  可容忍 sql injection 的風險，SQL console 的功能只允許 SELECT。                                                                                                    
+
+● 很清楚，這樣設計思路就完整了。讓我把現在的理解整理成一張圖，再指出幾個我覺得值得繼續想的地方。
+
+  ---
+  執行流程的完整樣貌
+
+  使用者
+    │
+    ├─ 選擇 Fab（多選）
+    ├─ 輸入/選擇 SQL（+ 填入參數）
+    └─ 點執行
+           │
+           ▼
+      ┌─────────────────────────────────────┐
+      │  後端：前置檢查                      │
+      │                                     │
+      │  1. SELECT-only 語法檢查             │
+      │     (sql-parse / sqlfluff)          │
+      │     ✗ 非 SELECT → 直接拒絕          │
+      │                                     │
+      │  2. 送 Test DB 試跑                  │
+      │     ✗ timeout → 拒絕，提示太慢      │
+      │     ✗ syntax error → 回傳 DB 錯誤   │
+      │     ✓ 通過 → 繼續                   │
+      └──────────────┬──────────────────────┘
+                     │
+                     ▼
+      ┌─────────────────────────────────────┐
+      │  並行打所有選定的 Fab               │
+      │                                     │
+      │  F12A ──► sidecar ──► Oracle F12A  │
+      │  F14A ──► sidecar ──► Oracle F14A  │
+      │  SOIC ──► sidecar ──► Oracle SOIC  │
+      │  ...                                │
+      └──────────────┬──────────────────────┘
+                     │
+                     ▼
+      ┌─────────────────────────────────────┐
+      │  結果合併                            │
+      │  每個 row 加上 fab 欄位             │
+      │  → 回傳給前端顯示                   │
+      └─────────────────────────────────────┘
+
+  ---
+  我看到三個值得深思的地方
+
+  ---
+  1. Test DB 的資料量 caveat
+  
+  Test DB 試跑通過 ≠ 正式 DB 一定快。如果 test DB 的資料量遠小於正式 DB，這個「效能檢查」給的是假安全感。
+
+  Test DB:  cpnt_execution_log 有 1 萬筆
+  Prod DB:  cpnt_execution_log 有 1000 萬筆
+
+  → Test 跑 0.2s 過了，Prod 跑 30s 還在轉
+
+  幾個應對方式：
+
+  ┌──────────────────────────────┬───────────────────────────────────────────┬──────────────────────────────┐
+  │             方式             │                   作法                    │             效果             │
+  ├──────────────────────────────┼───────────────────────────────────────────┼──────────────────────────────┤
+  │ 接受現狀                     │ Test 試跑只是基本過濾                     │ 簡單，但有漏網之魚           │
+  ├──────────────────────────────┼───────────────────────────────────────────┼──────────────────────────────┤
+  │ 加 prod-side timeout         │ 正式跑也設 timeout，超時回 partial result │ 最實用的護欄                 │
+  ├──────────────────────────────┼───────────────────────────────────────────┼──────────────────────────────┤
+  │ 強制 ROWNUM/FETCH FIRST 上限 │ 後端自動 wrap SQL 加 row limit            │ 防止大量資料撈出，但改了 SQL │
+  └──────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┘
+
+  你們的 test DB 資料量與 prod 差距大嗎？ 這決定 test 試跑的可信度。
+
+  ---
+  2. 有些 Fab 失敗、有些成功，要怎麼顯示？
+  
+  14 個 Fab 並行，網路問題或 DB 忙碌時可能只有部分回傳：
+
+  選了 6 個 Fab：
+
+    F12A ✓ 200 rows
+    F14A ✓ 150 rows
+    F15A ✗ timeout
+    F16  ✓ 80 rows
+    F18A ✗ connection refused
+    SOIC ✓ 300 rows
+
+  你希望的行為是？
+
+  - A. 部分成功就顯示：顯示 4 個 Fab 的結果，在頁面上標示 F15A / F18A 失敗（我覺得這個最好用）
+  - B. 全部成功才顯示：任一失敗就整批拒絕，讓使用者重試
+  - C. 讓使用者選：預設 A，但有「strict mode」勾選
+
+  ---
+  3. 合併後的分頁策略
+
+  這個比較技術性，但影響 UX：
+
+  選了 14 個 Fab，每個回 500 rows → 合併後 7000 rows
+
+  要全撈回來再分頁，還是讓每個 Fab 各自帶 ROWNUM 限制？
+
+  方案 A: 後端全撈，前端分頁（client-side pagination）
+    + 簡單實作
+    - 大量資料傳輸
+
+  方案 B: SQL 強制加 FETCH FIRST N ROWS ONLY
+    + 控制資料量
+    - 每個 Fab N rows，合併後最多 14×N rows，語意上有點奇怪
+
+  方案 C: 先抓第一頁，使用者翻頁再去 DB 撈
+    + 最標準的做法
+    - 實作最複雜（要傳 cursor / offset）
+
+  考量到這是 internal tool，方案 A 或 B 應該夠用，不需要 cursor-based pagination。你們預期一次查詢大概多少 rows 是合理的上限？
+
+  ---
+  情境 SQL 的 config 結構草圖
+
+  這個設計得好，未來擴充 admin 介面時改動最小：
+
+  # context_sqls.yaml
+  sqls:
+    - id: failed-cpnt-recent
+      name: 查詢最近失敗的 Cpnt
+      description: 指定天數內執行失敗的 Cpnt 記錄
+      sql: |
+        SELECT c.name, e.error_msg, e.fail_time
+        FROM cpnt c
+        JOIN cpnt_execution_log e ON c.id = e.cpnt_id
+        WHERE e.status = 'FAILED'
+          AND e.fail_time > SYSDATE - :days
+        ORDER BY e.fail_time DESC
+      params:
+        - name: days
+          label: 天數
+          type: integer
+          default: 7
+
+    - id: orphan-cpnt
+      name: 無 SOP 關聯的孤兒 Cpnt
+      description: 找出沒有被任何 SOP 引用的 Cpnt
+      sql: |
+        SELECT c.id, c.name, c.api_url
+        FROM cpnt c
+        WHERE NOT EXISTS (
+          SELECT 1 FROM sop_cpnt_rel r WHERE r.cpnt_id = c.id
+        )
+
+  前端收到這個 config 後，可以自動根據 params 欄位渲染參數輸入框，自訂 SQL 則完全自由輸入、不走 named parameter 路徑。
+
+  這個結構你覺得 OK？還是有其他情境 SQL 的屬性需要考慮（比如 tag / category？）
+
+  ---
+  和現有 change 的關係
+  
+  這個 feature 看起來是一個獨立的 capability，可以是 isop-cpnt-query-platform change 裡的新 capability（sql-console），或是另開一個獨立 change。
+
+  有一點值得注意：proposal.md 目前已把 sop-search、cpnt-search、failed-cpnt-search 都 comment 掉了——看起來方向可能已經在轉移，以 sql-console
+  取代原本三個結構化搜尋頁面？
+
+  這是刻意的方向調整，還是這個 SQL console 是在三個搜尋頁面之外另加的功能？
+
+  ❯ 1. test DB 資料量與 prod 差距大。可設定 prod-side timeout；rownum 預設為 100，前端顯示該欄位代表必填，最大限制為 300                                              
+  2. 以增加使用者體驗的角度來說，一個廠區 DB 回傳結果後即可讓前端顯示，不用等待所有 DB 完成 (後端非同步執行的概念)；失敗的 FAB 則顯示 bannar 告知使用者             
+  3. pagination 為共用元件，額外拉出一個議題討論，重點放在如何讓使用者快速確認各廠資料的不同 (diff)                                                                 
+  4. sql config 設計可以                                                                                                                                            
+                                                                                                                                                                    
+  sop-search、cpnt-search、failed-cpnt-search 仍會保留，但不在目前的功能內，稍後新增                                                                                
+
+● 很好，決策都很清晰。讓我把確認的部分先整理起來，然後把重心放在兩個最值得探索的技術問題：串流顯示架構與跨廠 diff 視覺化。
+
+  ---
+  已確認的設計決策摘要
+
+  ROWNUM:     預設 100，最大 300，前端必填欄位
+              後端自動 wrap：SELECT * FROM (...user sql...) WHERE ROWNUM <= :limit
+
+  Timeout:    Test DB 試跑（決定是否放行）
+              + Prod 每個 Fab 也有 timeout 護欄
+
+  失敗處理:   部分 Fab 失敗 → banner 通知，已完成的照常顯示
+
+  Scope:      sop/cpnt/failed-cpnt search 日後再加，本次聚焦 SQL console
+
+  ---
+  串流顯示架構
+
+  你說「一個廠區回傳後即顯示」，這需要後端非同步 + 前端增量更新。架構選項：
+
+  方案 A: SSE（Server-Sent Events）        ← 推薦
+  ────────────────────────────────────────────────────────
+    前端                後端 (Go)           各 Fab sidecar
+    ──────              ──────              ───────────────
+    POST /sql/execute
+    → 拿到 execution_id
+    GET /sql/stream/{id}  ←── 開 SSE 連線
+                          ├── goroutine F12A ──► sidecar F12A
+                          ├── goroutine F14A ──► sidecar F14A
+                          └── goroutine SOIC ──► sidecar SOIC
+
+    F12A 完成 ──────────► event: fab_result {fab:"F12A", rows:[...]}
+    SOIC 完成 ──────────► event: fab_result {fab:"SOIC", rows:[...]}
+    F14A 超時 ──────────► event: fab_error  {fab:"F14A", error:"timeout"}
+                          event: complete
+
+  方案 B: Polling
+  ────────────────
+    前端每 1s 輪詢 GET /sql/status/{id}
+    → 比較簡單，但有 1s 延遲感，且 Angular 要管 interval
+
+  方案 C: WebSocket
+  ────────────────
+    雙向通訊，這個場景用不到雙向，over-engineering
+
+  SSE 在 Angular 的實作很直覺：
+
+  // RxJS + EventSource
+  this.eventSource = new EventSource(`/api/sql/stream/${executionId}`);
+  fromEvent(this.eventSource, 'fab_result')
+    .pipe(map(e => JSON.parse(e.data)))
+    .subscribe(result => this.appendFabResult(result));
+
+  Go 後端用 channel 收集各 goroutine 的結果，有結果就 flush 給前端：
+
+  ┌──────────────────────────────────────────────────────┐
+  │  Go handler                                          │
+  │                                                      │
+  │  resultCh := make(chan FabResult, 14)                │
+  │                                                      │
+  │  for _, fab := range selectedFabs {                  │
+  │      go queryFab(fab, sql, params, resultCh)         │
+  │  }                                                   │
+  │                                                      │
+  │  for i := 0; i < len(selectedFabs); i++ {           │
+  │      result := <-resultCh                            │
+  │      sseWriter.WriteEvent("fab_result", result)      │
+  │      sseWriter.Flush()       ← 立即送出              │
+  │  }                                                   │
+  └──────────────────────────────────────────────────────┘
+
+  ---
+  跨廠 Diff 視覺化 — 這個最值得深思
+  
+  你說的「讓使用者快速確認各廠資料的不同」，我覺得這個 UX 問題比技術問題更有趣。
+
+  先想清楚：什麼情況下使用者需要 diff？
+
+  情境一：設定稽核
+    SQL: SELECT name, api_url, timeout_sec FROM cpnt WHERE name = 'payment_api'
+    目的：確認這個 Cpnt 在各廠設定是否一致
+    理想顯示：「F16 的 timeout_sec 跟其他廠不同」要一眼看出來
+
+  情境二：故障比對
+    SQL: SELECT status, fail_count FROM cpnt_stat WHERE date = SYSDATE
+    目的：找出哪幾個廠的失敗率異常
+    理想顯示：fail_count 的數值分布
+
+  情境三：純查詢
+    SQL: SELECT * FROM sop WHERE sop_id = :id
+    目的：只是查一筆，不在乎跨廠 diff
+    理想顯示：普通表格就好
+
+  ---
+  三種顯示模式的設計
+
+  ────────────────────────────────────────────────────────────────
+  模式 A: Flat Table（預設）
+  ────────────────────────────────────────────────────────────────
+
+   fab   │ name         │ api_url              │ timeout_sec
+  ───────┼──────────────┼──────────────────────┼────────────
+   F12A  │ payment_api  │ http://f12a/pay      │ 30
+   F14A  │ payment_api  │ http://f14a/pay      │ 30
+   F16   │ payment_api  │ http://f16/pay       │ ███ 60    ← 高亮差異
+   SOIC  │ payment_api  │ http://soic/pay      │ 30
+
+  簡單，diff 以顏色標示：
+    • 某欄位在所有 Fab 值相同 → 正常顯示
+    • 某欄位有 Fab 值不同     → 該 cell 標橘色
+
+
+  ────────────────────────────────────────────────────────────────
+  模式 B: Pivot（Fab 橫排）
+  ────────────────────────────────────────────────────────────────
+
+                 │ F12A          │ F14A          │ F16          │ SOIC
+  ───────────────┼───────────────┼───────────────┼──────────────┼─────────
+   api_url       │ http://f12a/… │ http://f14a/… │ http://f16/… │ http://soic/…
+   timeout_sec   │ 30            │ 30            │ ███ 60       │ 30
+
+  適合：行數少、Fab 數少、想橫向比較的情境
+  問題：14 個 Fab × 多欄 → 表格太寬
+
+  ────────────────────────────────────────────────────────────────
+  模式 C: Diff Summary Panel（加在表格上方）
+  ────────────────────────────────────────────────────────────────
+
+   ┌──────────────────────────────────────────────────────────┐
+   │ ⚠  發現跨廠差異                                          │
+   │    timeout_sec: F16 = 60，其餘廠 = 30                   │
+   │    (點擊欄位名稱可篩選顯示)                              │
+   └──────────────────────────────────────────────────────────┘
+   [flat table...]
+
+  ---
+  我的建議方向
+
+  這三個不互斥，可以組合：
+
+  預設：Flat Table + diff cell 高亮
+         ↓
+  顯示：Diff Summary Panel（有差異時才出現）
+         ↓
+  切換：[📊 Pivot View] 按鈕（optional）
+
+  這樣覆蓋了三種情境：
+  - 情境三（純查詢）→ 沒有 diff，只看 flat table
+  - 情境一（設定稽核）→ Diff Panel 直接告知差異在哪，高亮 cell 確認
+  - 情境二（數值比較）→ Pivot 橫向比較最直覺
+
+  ---
+  Diff 的計算邏輯
+  
+  「哪些 cell 需要高亮」這個演算法其實有些細節：
+
+  對於每個 column：
+    取所有 fab 的值 → SET
+
+    如果 |SET| == 1：所有廠一致 → 不高亮
+    如果 |SET| > 1：有差異 → 高亮差異值
+
+  但有些欄位本來就「應該不同」：
+    api_url 裡面包含廠區代號 (http://f12a.com/...) → 差異是預期的
+    這個要怎麼處理？
+
+  有兩個方向：
+  - 讓使用者標記「預期差異欄位」：可在 context SQL config 裡加 ignore_diff_columns: [api_url]
+  - 不處理，使用者自己判斷：保持簡單，diff 只是提示，不是規則
+
+  你覺得前者值得做嗎？還是先保持簡單？
+
+  ---
+  現在這個 feature 的輪廓很完整了。要我把它整理成一個新的 capability 草稿（sql-console）寫進 proposal，還是繼續探索某個細節？
+  ❯ - 串流顯示架構: SSE（Server-Sent Events）                                                                                                                         
+  - 跨廠 Diff 視覺化:                                                                                                                                               
+      - 預設為 Flat Table，直接顯示原始資料                                                                                                                         
+      - 支援 Diff 按鈕，當使用者按下才進行比較，並顯示 Diff Panel，差異 cell 標示高亮                                                                               
+      - 支援 Pivot View 按鈕                                                                                                                                        
+  - Diff 的計算邏輯                                                                                                                                                 
+      - 演算法可以                                                                                                                                                  
+      - 本來就「應該不同」的欄位 -> 不處理，使用者自己判斷                                                                                                          
+
+  ---
+  決策總覽
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  SQL Console — 設計決策                                      │
+  ├─────────────────────────────────────────────────────────────┤
+  │  輸入                                                        │
+  │  ├─ 多選 Fab（勾選框，不強制全選）                           │
+  │  ├─ ROWNUM：必填，預設 100，最大 300                         │
+  │  ├─ SQL 輸入框（自由輸入）                                   │
+  │  └─ 情境 SQL 選單（config 預存，含 named param 輸入框）      │
+  │                                                             │
+  │  執行流程                                                    │
+  │  ├─ 1. SELECT-only 語法檢查（sql-parse library）            │
+  │  ├─ 2. Test DB 試跑（timeout 護欄）                         │
+  │  ├─ 3. 後端並行打各 Fab（Go goroutine × channel）           │
+  │  ├─ 4. 後端 ROWNUM wrap：                                   │
+  │  │       SELECT * FROM (...) WHERE ROWNUM <= :limit         │
+  │  └─ 5. SSE 串流：有結果就推，不等全部完成                    │
+  │                                                             │
+  │  前端顯示                                                    │
+  │  ├─ Flat Table（預設）：fab 欄在最左，結果即時累加          │
+  │  ├─ [Diff] 按鈕：觸發比較，顯示 Diff Panel + 高亮 cell      │
+  │  ├─ [Pivot] 按鈕：fab 橫排，欄位縱排                        │
+  │  └─ 失敗 Fab：顯示 banner（不影響其他 Fab 結果）            │
+  │                                                             │
+  │  Diff 邏輯                                                  │
+  │  └─ 每欄 SET(values) > 1 → 該欄有差異 → 高亮              │
+  │     預期差異欄位由使用者自行判斷，不做過濾                   │
+  └─────────────────────────────────────────────────────────────┘
+
+● 完成。tasks.md 新增三個群組，共 30 個任務：
+
+  ┌────────────────────┬────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │        群組        │ 任務數 │                                                             內容                                                              │
+  ├────────────────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ 6. SQL Console     │ 4      │ context_sqls.yaml 結構、初始範本、config loader、驗證測試                                                                     │
+  │ 設定               │        │                                                                                                                               │
+  ├────────────────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ 7. SQL Console     │ 10     │ SELECT-only parser、ROWNUM wrap、Test DB 試跑、SSE endpoint、goroutine 並行、per-Fab timeout、單元 + 整合測試                 │
+  │ 後端               │        │                                                                                                                               │
+  ├────────────────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ 8. SQL Console     │ 16     │ TypeScript interfaces、SSE service、Fab multi-select、SQL 輸入框、情境 SQL 選單、named param 渲染、Diff 邏輯、Pivot           │
+  │ 前端               │        │ 切換、路由、單元測試                                                                                                          │
+  ├────────────────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ 9. 整合驗收測試    │ 10     │ 串流顯示、SELECT 強制、ROWNUM 限制、部分 Fab 失敗、Diff / Pivot 功能                                                          │
+  └────────────────────┴────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// ValidateSelectOnly rejects non-SELECT statements.
+// ValidateSelectOnly rejects non-SELECT statements. 
 // Uses prefix matching instead of a SQL parser to avoid Oracle-specific syntax incompatibilities.
 func ValidateSelectOnly(sql string) error {
 	upper := strings.TrimSpace(strings.ToUpper(sql))
@@ -14,3 +14,5 @@ func ValidateSelectOnly(sql string) error {
 	}
 	return fmt.Errorf("only SELECT queries are allowed")
 }
+
+// TODO - SQL linter (find sutiable golang package)

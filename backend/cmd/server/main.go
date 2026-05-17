@@ -1,3 +1,10 @@
+// Package main is the SQL Console API server.
+//
+// @title           SQL Console API
+// @version         1.0
+// @description     Multi-fab plain SQL query interface with SSE streaming. Validates SELECT-only queries, wraps ROWNUM, trial-runs on Test DB, then fans out goroutines per Fab.
+// @host            localhost:8080
+// @BasePath        /
 package main
 
 import (
@@ -6,9 +13,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"isop-cpnt/backend/internal/config"
 	"isop-cpnt/backend/internal/console"
 	"isop-cpnt/backend/internal/fabquery"
+
+	_ "isop-cpnt/backend/docs"
 )
 
 func main() {
@@ -31,6 +41,10 @@ func main() {
 	r.Get("/api/fabs/stream/{id}", h.Stream)
 	r.Get("/api/console/templates", h.Templates)
 
-	log.Printf("listening on :%s", cfg.Port)
+	r.Get("/swagger/*", httpSwagger.Handler(
+		httpSwagger.URL("/swagger/doc.json"),
+	))
+
+	log.Printf("listening on :%s  — Swagger UI: http://localhost:%s/swagger/index.html", cfg.Port, cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, r))
 }

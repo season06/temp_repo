@@ -1,20 +1,27 @@
-version: "3.9"
 services:
   backend:
     build: ./backend
-    ports: ["8080:8080"]
-    env_file: .env
-    depends_on: [sidecar-test]
-
-  sidecar-test:
-    build: ./sidecar
+    ports:
+      - "8080:8080"
+    # env_file: .env
     environment:
-      ORACLE_USER: ${ORACLE_USER}
-      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
-      ORACLE_DSN: ${ORACLE_TEST_DSN}
-    ports: ["8001:8000"]
+      PORT: "8080"
+      SIDECAR_TEST_URL: "http://sidecar-test:8000"
+    # depends_on:
+    #   sidecar-test:
+    #     condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/console/templates"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
-  frontend:
-    build: ./frontend
-    ports: ["4200:80"]
-    depends_on: [backend]
+  # sidecar-test:
+  #   build: ./sidecar
+  #   ports:
+  #     - "8001:8000"
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3

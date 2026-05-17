@@ -1,0 +1,298 @@
+這份設計稿已經把 UX 和視覺系統定義得非常完整，包括：
+  
+  - 上下分割布局（builder + results）
+  - Fab 多選 dropdown（含 all/none/invert）
+  - SQL 編輯器（line numbers + syntax highlight）
+  - SSE 串流 skeleton rows（streaming… → ok/err）
+  - Flat table + diff cell 高亮 + pivot view
+  - Diff mini-bar → 展開 diff panel（含 value grouping by fab）
+  - Column header filter popover
+  - 失敗 fab banner
+
+  設計稿本身就是很好的實作 spec。現在我想問的是一個實作層面的問題：
+
+  SQL 編輯器的實作方式，設計裡用的是 contenteditable <pre> + 手刻 syntax highlight。在 Angular 實作時，這個選擇是要：
+
+  A. 沿用手刻 contenteditable + highlight 方案
+  - 依照設計稿的 highlightSql() 函式用 regex 替換 HTML
+  - 輕量，無外部依賴
+  - 但 contenteditable 在處理 cursor position、貼上文字時有邊緣情況要處理
+  
+  B. 整合 Monaco Editor（VS Code 同款）
+  - 原生 Oracle SQL syntax、autocomplete、line numbers
+  - @monaco-editor/angular package
+  - Bundle size 增加約 2.5MB（gzip 後 ~800KB）
+  - 樣式需要調整以融入現有設計
+  
+  設計稿的風格已很精準，你傾向哪個方向？
+
+● 已確認：Monaco Editor 用於 SQL 輸入（@monaco-editor/angular），style 調整融入現有設計。
+
+  下一個問題。SSE 串流過程中，每個 fab 的狀態（pend/run/ok/err）、result rows、diff 計算都需要 reactive state。Angular 這邊的狀態管理方式：
+
+  A. RxJS + Service（BehaviorSubject）
+  傳統 Angular 做法，SqlConsoleService 持有 BehaviorSubject<FabState[]>，component 用 async pipe 訂閱。熟悉度高、無額外依賴。
+  
+  B. Angular Signals（standalone）
+  Angular 16+ 原生 reactive primitives。signal<FabState[]>() + computed(() => diffColumns(...))。程式更簡潔，diff 計算可直接用 computed signal 自動更新，不需手動
+  trigger。
+  
+  C. NgRx
+  完整 store/action/reducer pattern。對 < 20 人 internal tool 是 overkill。
+
+  你們 Angular 用的版本是幾？以及 team 對 Signals 的熟悉度如何？（這兩個因素決定 A 或 B 哪個更合適）
+
+● Angular 21 + Signals 確認，這是目前最佳選擇。computed(() => diffColumns(results())) 可以讓 diff 計算完全自動響應，不需要手動 trigger。
+
+  最後一個問題，關於後端。SQL Console 的後端邏輯（SELECT-only check、ROWNUM wrap、Test DB 試跑、SSE goroutine pool）是：
+
+  A. 新增 /internal/console package
+  SQL Console 自成一個 package，有自己的 handler.go、service.go、validator.go。清楚隔離，不碰其他 package。
+  
+  B. 放進現有 /internal/handler + /internal/service
+  SQL Console handler 加進 handler package，service 邏輯加進 service package，跟 SOP/Cpnt 的查詢放在一起。
+
+  考量 SQL Console 的執行模型（SSE goroutines、Test DB trial run）跟其他結構化查詢差異很大，A 比較好維護。你有偏好嗎？或者後端目錄結構已有既定規範？
+
+❯ 只要有多廠區查詢的功能 都會需要 SSE goroutines, Test DB                                                                                                           
+  
+● 很好的觀察——這改變了架構思路。SSE goroutine fan-out 和 Test DB trial run 是所有多廠查詢的共同基礎設施，不只是 SQL Console 的功能。
+
+  我已經有足夠的資訊可以進入設計了。
+
+● 這個認知讓後端有三種組織方式：
+
+  ---
+  方案 A：單一通用 fab-query endpoint（推薦）
+  
+  POST /api/fabs/query  →  GET /api/fabs/stream/{id}
+  
+  所有多廠查詢共用同一個 SSE 端點
+  SQL Console → 直接送 SQL
+  SOP Search  → 後端把篩選條件轉成 SQL，走相同端點
+  Cpnt Search → 同上
+
+  /internal/fabquery/          ← 核心 package
+    engine.go     goroutine fan-out + channel collect
+    sse.go        SSE writer + flush
+    testdb.go     Test DB trial run
+    rownum.go     ROWNUM wrap
+    validator.go  SELECT-only check
+
+  /internal/console/           ← SQL Console 專屬
+    handler.go    解析 request、呼叫 fabquery engine
+    templates.go  context_sqls.yaml loader
+
+  /internal/sop/               ← 日後新增，SQL 由後端生成
+  /internal/cpnt/
+
+  優點：SSE 基礎設施只實作一次，所有功能共享；未來新增查詢頁面只需要「定義 SQL」不需要「重寫串流邏輯」。
+  缺點：第一次實作需要把介面設計對。
+
+  ---
+  方案 B：各功能獨立 endpoint，共用 internal package
+  
+  POST /api/sql/execute   →  GET /api/sql/stream/{id}
+  POST /api/sops/query    →  GET /api/sops/stream/{id}    ← 日後
+  POST /api/cpnts/query   →  GET /api/cpnts/stream/{id}   ← 日後
+  
+  /internal/fabquery/  共用 package（engine、SSE、testdb）
+  /internal/console/   自己的 handler，呼叫 fabquery
+  /internal/sop/       自己的 handler，呼叫 fabquery
+  
+  優點：每個功能的 endpoint 完全獨立，容易個別修改。
+  缺點：重複的 handler 樣板，stream endpoint 路由規則分散。
+
+  ---
+  方案 C：方案 A 的 engine 改為 gRPC streaming
+
+  不採用——維護成本過高，SSE 對這個規模已經足夠。
+
+  ---
+  我推薦方案 A，理由是：你剛剛說的那句話本身就說明了這個選擇——「只要有多廠區查詢都會需要 SSE goroutines + Test DB」。把這個邏輯抽成一個端點，不用抽成一個
+  package，從根源消除重複。
+  
+  你傾向 A 或 B？
+
+● Section 1: Overall Architecture
+
+  Three layers, each with a single responsibility:
+
+  Angular (Browser)
+    └─ SQLConsoleComponent
+         ├─ MonacoEditor (SQL input)
+         ├─ FabSelectorComponent (multi-select, 14 fabs)
+         ├─ ContextSQLSelectorComponent (YAML templates)
+         └─ ResultsComponent (Flat Table / Diff / Pivot)
+              └─ FabQueryService (SSE client)
+
+  Golang Backend
+    └─ /api/fabs/query (POST)  →  /api/fabs/stream/{id} (GET SSE)
+         └─ /internal/fabquery/   ← shared by ALL multi-fab features
+              ├─ engine.go        fan-out goroutines, collect via channel
+              ├─ testdb.go        trial run on test sidecar
+              ├─ validator.go     SELECT-only enforcement
+              └─ rownum.go        auto-wrap with ROWNUM <= :limit
+  
+  Python Sidecar Adapter (per Fab + Test DB)
+    └─ HTTP endpoint wrapping Oracle cx_Oracle SDK
+         POST /query  →  { rows: [...], columns: [...] }
+
+  Request lifecycle:
+  1. User submits SQL + selected fabs
+  2. Backend validates (SELECT-only) → test DB trial run → issue stream ID
+  3. Frontend opens SSE connection on stream/{id}
+  4. Backend fans out goroutines (one per fab), results flush as SSE events
+  5. Frontend accumulates into signal<FabResult[]>(), table renders incrementally
+
+  Does this architecture section look right?
+
+● Section 2: Frontend Components
+
+  sql-console/ 
+    sql-console.component.ts      頁面容器，持有所有 signals
+    sql-console.component.html
+
+    fab-selector/
+      fab-selector.component.ts   multi-select dropdown，emit signal<string[]>
+  
+    context-sql/
+      context-sql.component.ts    scenario selector，選後填入 editor
+      context-sql.service.ts      GET /api/console/templates → 快取
+
+    sql-editor/
+      sql-editor.component.ts     Monaco wrapper，OnPush
+      named-param.directive.ts    偵測 :param 語法，render 輸入框
+  
+    results/
+      results.component.ts        根據 viewMode signal 切換顯示
+      flat-table.component.ts     所有 fab rows 合在一表，fab column 固定在最左
+      diff-panel.component.ts     computed(() => diffColumns(...))，高亮差異 cell
+      pivot-view.component.ts     fabs 為欄，fields 為列
+      fab-status-chip.component.ts loading / done / error 狀態
+
+  State model（全在 SQLConsoleComponent）：
+  selectedFabs   = signal<string[]>([])
+  sql            = signal<string>('')
+  rowLimit       = signal<number>(100)
+  queryId        = signal<string | null>(null)
+  fabResults     = signal<FabResult[]>([])
+  viewMode       = signal<'flat' | 'diff' | 'pivot'>('flat')
+
+  diffColumns    = computed(() => detectDiff(this.fabResults()))
+  
+  FabQueryService 封裝 EventSource，每個 SSE event → fabResults.update()，Angular change detection 自動 reactive。
+  
+  Frontend 不需要 NgRx，所有 state 在單一 component 的 signals 內，子 component 透過 input() + output() 溝通。
+
+  這部分看起來 OK 嗎？
+
+● Section 3: Backend Data Flow
+
+  主流程：
+
+  POST /api/fabs/query
+    body: { sql, fabs, rowLimit, namedParams }
+    │
+    ├─ validator.go: 解析 SQL AST，確認為 SELECT（非 DDL/DML）
+    │    └─ 失敗 → 400 { error: "only SELECT allowed" }
+    │
+    ├─ rownum.go: 包裹 → SELECT * FROM (...user sql...) WHERE ROWNUM <= :limit
+    │
+    ├─ testdb.go: 送 Test DB sidecar 試跑（timeout: 5s）
+    │    └─ 超時或錯誤 → 400 { error: "query too slow or invalid" }
+    │
+    ├─ 建立 queryId（UUID），存入 in-memory map（TTL 5min）
+    └─ 200 { queryId }
+  
+  GET /api/fabs/stream/{queryId}
+    │
+    ├─ 設定 SSE headers（text/event-stream, no-cache）
+    ├─ engine.go: 對每個 fab 啟動 goroutine
+    │    └─ goroutine: POST sidecar /query → 結果送入 channel
+    │
+    ├─ SSE flush loop:
+    │    for result := range resultChan {
+    │      write event: { fab, rows, columns, status }
+    │      flush()
+    │    }
+    └─ 所有 goroutine 完成 → 送 event: { type: "done" } → 關閉連線
+
+  Sidecar 通訊：
+  每個 Fab 對應一個 sidecar endpoint（從 config 讀取 URL map）。Goroutine 逾時設 30s per fab；失敗的 fab 送 { fab, status: "error", message } event，不阻斷其他 fab
+  的結果。
+
+  這部分看起來 OK 嗎？
+
+● Section 4: Error Handling
+
+  分層處理原則：快速失敗在前，部分失敗在後。
+
+  ┌──────────────────────┬───────────────────┬─────────────────────────────────┐
+  │        情境           │        層級        │              行為               │
+  ├──────────────────────┼────────────────────┼─────────────────────────────────┤
+  │ 非 SELECT 語法        │ Backend（POST）      │ 400，立即回傳，不進入 Test DB          │
+  ├──────────────────────┼──────────────────────┼────────────────────────────────────────┤
+  │ Test DB 超時（>5s）   │ Backend（POST）      │ 400，說明 query 過慢                   │
+  ├──────────────────────┼──────────────────────┼────────────────────────────────────────┤
+  │ Test DB 語法錯誤      │ Backend（POST）      │ 400，回傳 Oracle 錯誤訊息                              │
+  ├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+  │ Named param 未填      │ Frontend             │ 送出前 disable 按鈕，提示必填                          │
+  ├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+  │ ROWNUM 超出 300       │ Frontend + Backend   │ Frontend 截斷；Backend 二次驗證                        │
+  ├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+  │ 單一 Fab sidecar 失敗 │ Backend（SSE event） │ { fab, status:"error" } → 繼續其他 fab                 │
+  ├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+  │ 所有 Fab 失敗         │ Frontend             │ 顯示全域錯誤 banner                                    │
+  ├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+  │ SSE 連線中斷          │ Frontend             │ FabQueryService 偵測 EventSource.onerror，顯示重試提示 │
+  ├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────┤
+  │ QueryId 不存在/過期   │ Backend（SSE）       │ 404，frontend 顯示「查詢已過期，請重新執行」           │
+  └──────────────────────┴──────────────────────┴────────────────────────────────────────────────────────┘
+
+  Partial failure UX：
+  每個 fab 有獨立的 FabStatusChip（loading → done / error）。失敗的 fab 在表格中顯示 error row，不影響其他 fab 的結果渲染。使用者可看到「12/14 廠區成功」。
+  
+  這部分看起來 OK 嗎？
+
+● Section 5: Testing Strategy
+
+  Backend（Go）：
+
+  ┌─────────────┬──────────────────────────────────────────────────────┬────────────────────────┐
+  │  測試類型    │                       涵蓋目標                        │          工具          │
+  ├─────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+  │ Unit        │ validator.go：SELECT/非SELECT各語法                   │ go test                │
+  ├─────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+  │ Unit        │ rownum.go：包裹輸出是否正確                             │ go test                │
+  ├─────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+  │ Unit        │ engine.go：goroutine fan-out、channel 收集、部分失敗    │ go test + mock sidecar │
+  ├─────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+  │ Unit        │ testdb.go：超時邏輯                                    │ go test + fake server  │
+  ├─────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+  │ Integration │ POST → SSE 完整流程，mock sidecar 回傳固定資料           │ httptest               │
+  ├─────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+  │ Integration │ SSE event 順序與 done 事件                             │ httptest               │
+  └─────────────┴──────────────────────────────────────────────────────┴────────────────────────┘
+
+  Frontend（Angular）：
+
+  ┌───────────┬──────────────────────────────────────────────────┬────────────────────────────┐
+  │ 測試類型    │                     涵蓋目標                     │            工具            │
+  ├───────────┼──────────────────────────────────────────────────┼────────────────────────────┤
+  │ Unit      │ diffColumns() computed：同值/異值/缺 fab         │ Jasmine                    │
+  ├───────────┼──────────────────────────────────────────────────┼────────────────────────────┤
+  │ Unit      │ FabQueryService：SSE event 解析、fabResults 累積 │ Jasmine + EventSource mock │
+  ├───────────┼──────────────────────────────────────────────────┼────────────────────────────┤
+  │ Unit      │ NamedParamDirective：:param 偵測與輸入框渲染     │ Angular Testing            │
+  ├───────────┼──────────────────────────────────────────────────┼────────────────────────────┤
+  │ Component │ FabSelectorComponent：全選/取消、emit 正確       │ Angular Testing            │
+  ├───────────┼──────────────────────────────────────────────────┼────────────────────────────┤
+  │ Component │ ResultsComponent：flat/diff/pivot 切換           │ Angular Testing            │
+  └───────────┴──────────────────────────────────────────────────┴────────────────────────────┘
+
+  Acceptance（E2E，Group 9 in tasks.md）：
+  使用真實 Test DB sidecar，驗證：SELECT 允許、非 SELECT 拒絕、部分 fab 失敗時其他 fab 仍回傳、ROWNUM 上限 300 被強制執行。
+  
+  ---
+  以上五個 section 都確認後，我會把完整 design doc 寫入 docs/superpowers/specs/ 並 commit。這部分看起來 OK 嗎？

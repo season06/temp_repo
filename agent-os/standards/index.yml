@@ -1,0 +1,25 @@
+# Agent OS Standards Index
+
+global:
+  tech-stack:
+    description: 專案技術堆疊 — Angular 前端、Golang 後端、Oracle DB（透過 Python Sidecar）、Docker/K8s 部署
+  domain-terms:
+    description: 核心領域術語定義 — Cpnt（積木）、SOP、Fab（廠區）及其關係與有效廠區清單
+  features:
+    description: 核心業務流程 — 資料存取模式（Sidecar 架構）與三大功能 workflow（搜尋 SOP、Cpnt、失敗記錄）
+
+api:
+  conventions:
+    description: REST API 設計規範 — URL 格式、SQL Console 端點、SSE response format、HTTP status codes、Sidecar 通訊規範
+
+backend:
+  conventions:
+    description: Golang 後端開發規範 — 專案結構（/internal/fabquery、/console）、命名規則、Engine fan-out 模式、error handling
+  sql-validation:
+    description: SQL SELECT-only 驗證規範 — 現有 prefix 策略限制、已知 TODO、Fab 白名單驗證、驗證時機
+  streaming:
+    description: SSE 多廠串流規範 — 兩階段 API（query/stream）、Query Store TTL、goroutine fan-out、event 格式
+
+frontend:
+  conventions:
+    description: Angular 前端開發規範 — 專案結構、元件命名、OnPush strategy、service 層 API 呼叫模式、TypeScript 型別規範

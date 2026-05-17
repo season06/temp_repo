@@ -1,0 +1,126 @@
+basePath: /
+definitions:
+  console.SqlParam:
+    properties:
+      default: {}
+      label:
+        type: string
+      name:
+        type: string
+      type:
+        type: string
+    type: object
+  console.SqlTemplate:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      params:
+        items:
+          $ref: '#/definitions/console.SqlParam'
+        type: array
+      sql:
+        type: string
+    type: object
+  console.errorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  console.executeRequest:
+    properties:
+      fabs:
+        items:
+          type: string
+        type: array
+      namedParams:
+        additionalProperties: true
+        type: object
+      rowLimit:
+        type: integer
+      sql:
+        type: string
+    type: object
+  console.executeResponse:
+    properties:
+      queryId:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Multi-fab plain SQL query interface with SSE streaming. Validates SELECT-only
+    queries, wraps ROWNUM, trial-runs on Test DB, then fans out goroutines per Fab.
+  title: SQL Console API
+  version: "1.0"
+paths:
+  /api/console/templates:
+    get:
+      description: Returns pre-configured SQL templates from context_sqls.yaml.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/console.SqlTemplate'
+            type: array
+      summary: List SQL templates
+      tags:
+      - templates
+  /api/fabs/query:
+    post:
+      consumes:
+      - application/json
+      description: Validates the SQL (SELECT-only), wraps ROWNUM, trial-runs on Test
+        DB, and returns a queryId for SSE streaming.
+      parameters:
+      - description: Query request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/console.executeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/console.executeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/console.errorResponse'
+      summary: Submit SQL query
+      tags:
+      - query
+  /api/fabs/stream/{id}:
+    get:
+      description: Opens an SSE stream for the given queryId. Emits fab_result or
+        fab_error events per fab, then a done event.
+      parameters:
+      - description: Query ID returned by POST /api/fabs/query
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/console.errorResponse'
+      summary: Stream query results (SSE)
+      tags:
+      - query
+swagger: "2.0"

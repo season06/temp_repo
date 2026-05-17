@@ -1,0 +1,138 @@
+● engine.go — 多廠平行查詢引擎
+
+  核心概念：Goroutine + Channel
+
+  Go 裡的 goroutine 類似輕量執行緒，channel 是 goroutine 之間傳遞資料的管道。engine.go 用這兩個機制同時查詢多個廠區。
+
+  資料結構
+
+  type FabResult struct {
+      Fab     string                   // 廠區代號，e.g. "F12A"
+      Columns []string                 // 欄位名稱
+      Rows    []map[string]interface{} // 查詢結果，每行是一個 key-value map
+      Status  string                   // "ok" 或 "error"
+      Error   string                   // 錯誤訊息（Status=error 時才有）
+  }
+
+  type Engine struct {
+      sidecars map[string]string // fab → sidecar URL，e.g. "F12A" → "http://sidecar-f12a:8000"
+      timeout  time.Duration     // 每個廠區的查詢上限時間
+  }
+
+  Execute — 平行查詢的核心
+
+  func (e *Engine) Execute(...) <-chan FabResult {
+      ch := make(chan FabResult, len(fabs))  // 建一個 channel，容量 = 廠區數
+      var wg sync.WaitGroup                  // WaitGroup = 計數器，追蹤還有幾個查詢在跑
+
+      for _, fab := range fabs {
+          wg.Add(1)                          // 計數 +1
+          go func(fab string) {              // 「go」= 啟動一個 goroutine（平行執行）
+              defer wg.Done()                // 這個 goroutine 結束時，計數 -1
+              ch <- e.queryFab(...)          // 查詢結果丟進 channel
+          }(fab)
+      }
+
+      go func() {
+          wg.Wait()   // 等所有廠區查詢都完成（計數歸零）
+          close(ch)   // 關閉 channel，通知外面「沒有更多結果了」
+      }()
+
+      return ch  // 立刻回傳 channel（不等查詢完成）
+  }
+
+  視覺化（3 個廠區）：
+
+  Execute() 呼叫
+      │
+      ├── goroutine → queryFab(F12A) ──┐
+      ├── goroutine → queryFab(F12B) ──┼──→ channel ──→ 呼叫端逐一收結果
+      └── goroutine → queryFab(F14A) ──┘
+           （三個同時跑，誰先完成誰先進 channel）
+
+  queryFab — 呼叫單一廠區的 Sidecar
+
+  func (e *Engine) queryFab(ctx, fab, sql, params) FabResult {
+      // 1. 查 sidecar URL
+      url := e.sidecars[fab]  // e.g. "http://sidecar-f12a:8000"
+
+      // 2. 設定 timeout（30 秒後自動放棄）
+      ctx, cancel := context.WithTimeout(ctx, e.timeout)
+      defer cancel()  // 函式結束時釋放資源
+
+      // 3. 組 HTTP request，POST 到 sidecar
+      body, _ := json.Marshal(map[string]interface{}{"sql": sql, "params": params})
+      req, _ := http.NewRequestWithContext(ctx, "POST", url+"/query", body)
+
+      // 4. 發送請求，解析結果
+      resp, err := http.DefaultClient.Do(req)
+      if err != nil {
+          return FabResult{Fab: fab, Status: "error", Error: err.Error()}
+      }
+
+      // 5. 回傳結果（成功或失敗都包在 FabResult 裡，不 panic）
+  }
+
+  重點： 即使某個廠區查詢失敗，只是回傳 Status: "error" 的結果，不會影響其他廠區。
+
+  ---
+
+● sse.go — 即時推送結果給瀏覽器
+
+  什麼是 SSE？
+
+  SSE（Server-Sent Events）是一種 HTTP 長連線技術：瀏覽器開一個連線後保持開著，Server 可以隨時把資料「推」過去，不需要瀏覽器一直輪詢。
+
+  SetSSEHeaders — 告訴瀏覽器「這是串流」
+
+  func SetSSEHeaders(w http.ResponseWriter) {
+      w.Header().Set("Content-Type", "text/event-stream") // 宣告這是 SSE
+      w.Header().Set("Cache-Control", "no-cache")         // 不要快取
+      w.Header().Set("Connection", "keep-alive")          // 保持連線
+  }
+
+  WriteSSEEvent — 推送一筆資料
+
+  func WriteSSEEvent(w http.ResponseWriter, event string, data interface{}) {
+      payload, _ := json.Marshal(data)  // 轉成 JSON 字串
+      fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload)
+      //                                              ↑↑ 兩個換行 = 一筆 event 結束（SSE 規範）
+
+      if f, ok := w.(http.Flusher); ok {
+          f.Flush()  // 立刻沖出去，不要等 buffer 滿了再送
+      }
+  }
+
+  實際送出的格式長這樣：
+  event: fab_result
+  data: {"fab":"F12A","columns":["name"],"rows":[{"name":"cpnt_a"}],"status":"ok"}
+
+  event: fab_error
+  data: {"fab":"F12B","message":"ORA-00942: table not found"}
+
+  event: done
+  data: {"status":"complete"}
+  
+
+  兩者如何一起運作
+
+  // handler.go 的 Stream 方法
+  fabquery.SetSSEHeaders(w)                              // 設定串流 headers
+
+  resultCh := h.engine.Execute(ctx, sql, fabs, params)  // 啟動平行查詢，拿到 channel
+  for result := range resultCh {                         // 每當有廠區完成，就進來一次
+      if result.Status == "error" {
+          fabquery.WriteSSEEvent(w, "fab_error", ...)    // 立刻推給瀏覽器
+      } else {
+          fabquery.WriteSSEEvent(w, "fab_result", result)
+      }
+  }
+  fabquery.WriteSSEEvent(w, "done", ...)                 // 全部完成，送結束訊號
+
+  時序：
+
+  t=0s  連線建立，Engine 啟動 3 個 goroutine
+  t=2s  F12B 完成 → WriteSSEEvent → 瀏覽器立刻收到 F12B 結果
+  t=5s  F12A 完成 → WriteSSEEvent → 瀏覽器立刻收到 F12A 結果
+  t=8s  F14A 完成 → WriteSSEEvent → 瀏覽器立刻收到 F14A 結果
+  t=8s  channel 關閉 → WriteSSEEvent("done") → 連線結束

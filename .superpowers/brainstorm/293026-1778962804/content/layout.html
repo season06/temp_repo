@@ -1,0 +1,96 @@
+<h2>SQL Console 頁面布局</h2>
+<p class="subtitle">選擇控制區與結果區的排列方式</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#1a1a2e;padding:12px;font-family:monospace;font-size:11px;">
+      <div style="display:flex;gap:6px;height:180px;">
+        <div style="width:38%;background:#16213e;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:6px;">
+          <div style="background:#0f3460;border-radius:3px;height:18px;display:flex;align-items:center;padding:0 6px;color:#e2e8f0;font-size:10px;">📋 情境 SQL</div>
+          <div style="background:#0f3460;border-radius:3px;height:14px;display:flex;align-items:center;padding:0 6px;color:#a0aec0;font-size:9px;">☑ F12A  ☑ F14A  ☐ F16</div>
+          <div style="background:#0f3460;border-radius:3px;height:12px;display:flex;align-items:center;padding:0 6px;color:#a0aec0;font-size:9px;">ROWNUM: 100</div>
+          <div style="background:#1a1a3e;border-radius:3px;flex:1;padding:6px;color:#68d391;font-size:9px;line-height:1.4;">SELECT name,<br/>api_url<br/>FROM cpnt<br/>WHERE status=<br/>'ACTIVE'</div>
+          <div style="background:#4a5568;border-radius:3px;height:18px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;">▶ 執行</div>
+        </div>
+        <div style="flex:1;background:#16213e;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:4px;">
+          <div style="display:flex;gap:4px;">
+            <div style="background:#2d3748;border-radius:3px;padding:2px 6px;font-size:9px;color:#68d391;">Flat</div>
+            <div style="background:#1a1a3e;border-radius:3px;padding:2px 6px;font-size:9px;color:#a0aec0;">Diff</div>
+            <div style="background:#1a1a3e;border-radius:3px;padding:2px 6px;font-size:9px;color:#a0aec0;">Pivot</div>
+          </div>
+          <div style="background:#1a1a3e;border-radius:3px;flex:1;overflow:hidden;">
+            <div style="background:#2d3748;padding:3px 6px;font-size:9px;color:#a0aec0;display:flex;gap:12px;"><span>fab</span><span>name</span><span>api_url</span><span>status</span></div>
+            <div style="padding:3px 6px;font-size:9px;color:#68d391;display:flex;gap:12px;"><span>F12A</span><span>pay_api</span><span>http://f12...</span><span>OK</span></div>
+            <div style="padding:3px 6px;font-size:9px;color:#68d391;display:flex;gap:12px;background:#1e2a3a;"><span>F14A</span><span>pay_api</span><span>http://f14...</span><span>OK</span></div>
+            <div style="padding:3px 6px;font-size:9px;color:#fbd38d;display:flex;gap:12px;"><span>F16 ⟳</span><span>—</span><span>—</span><span>—</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — 左右分割</h3>
+      <p>左側固定控制欄（Fab 選擇、SQL 輸入）；右側結果區。類似 DBeaver / DataGrip 布局，控制項隨時可見。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#1a1a2e;padding:12px;font-family:monospace;font-size:11px;">
+      <div style="display:flex;flex-direction:column;gap:6px;height:180px;">
+        <div style="background:#16213e;border-radius:4px;padding:8px;display:flex;gap:8px;align-items:center;">
+          <div style="background:#0f3460;border-radius:3px;padding:3px 8px;font-size:9px;color:#e2e8f0;">📋 情境SQL ▾</div>
+          <div style="background:#0f3460;border-radius:3px;padding:3px 8px;font-size:9px;color:#a0aec0;">☑F12A ☑F14A ☐F16...</div>
+          <div style="background:#0f3460;border-radius:3px;padding:3px 8px;font-size:9px;color:#a0aec0;">ROWNUM:100</div>
+          <div style="flex:1"></div>
+          <div style="background:#4a5568;border-radius:3px;padding:3px 10px;font-size:9px;color:#fff;">▶ 執行</div>
+        </div>
+        <div style="background:#1a1a3e;border-radius:4px;padding:6px;height:52px;color:#68d391;font-size:9px;line-height:1.5;">SELECT name, api_url FROM cpnt WHERE status = 'ACTIVE'</div>
+        <div style="background:#16213e;border-radius:4px;flex:1;padding:6px;display:flex;flex-direction:column;gap:3px;">
+          <div style="display:flex;gap:4px;">
+            <div style="background:#2d3748;border-radius:3px;padding:2px 6px;font-size:9px;color:#68d391;">Flat</div>
+            <div style="background:#1a1a3e;border-radius:3px;padding:2px 6px;font-size:9px;color:#a0aec0;">Diff</div>
+            <div style="background:#1a1a3e;border-radius:3px;padding:2px 6px;font-size:9px;color:#a0aec0;">Pivot</div>
+          </div>
+          <div style="background:#1a1a3e;border-radius:3px;flex:1;overflow:hidden;">
+            <div style="background:#2d3748;padding:3px 6px;font-size:9px;color:#a0aec0;display:flex;gap:12px;"><span>fab</span><span>name</span><span>api_url</span></div>
+            <div style="padding:3px 6px;font-size:9px;color:#68d391;display:flex;gap:12px;"><span>F12A</span><span>pay_api</span><span>http://f12...</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — 上下分割</h3>
+      <p>頂部工具列（Fab、ROWNUM）+ SQL 輸入框 + 底部結果區。類似 SQL Fiddle，垂直流向，結果區佔更多空間。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#1a1a2e;padding:12px;font-family:monospace;font-size:11px;">
+      <div style="display:flex;gap:6px;height:180px;">
+        <div style="width:28px;background:#16213e;border-radius:4px;display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:8px;">
+          <div style="color:#a0aec0;font-size:8px;writing-mode:vertical-rl;transform:rotate(180deg);">◀ 控制</div>
+        </div>
+        <div style="flex:1;background:#16213e;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:4px;">
+          <div style="background:#e53e3e;border-radius:3px;padding:3px 6px;font-size:9px;color:#fff;">⚠ F16 查詢超時</div>
+          <div style="display:flex;gap:4px;">
+            <div style="background:#2d3748;border-radius:3px;padding:2px 6px;font-size:9px;color:#68d391;">Flat</div>
+            <div style="background:#1a1a3e;border-radius:3px;padding:2px 6px;font-size:9px;color:#a0aec0;">Diff</div>
+            <div style="background:#1a1a3e;border-radius:3px;padding:2px 6px;font-size:9px;color:#a0aec0;">Pivot</div>
+          </div>
+          <div style="background:#1a1a3e;border-radius:3px;flex:1;overflow:hidden;">
+            <div style="background:#2d3748;padding:3px 6px;font-size:9px;color:#a0aec0;display:flex;gap:12px;"><span>fab</span><span>name</span><span>api_url</span><span>status</span></div>
+            <div style="padding:3px 6px;font-size:9px;color:#68d391;display:flex;gap:12px;"><span>F12A</span><span>pay_api</span><span>http://f12...</span><span>OK</span></div>
+            <div style="padding:3px 6px;font-size:9px;color:#68d391;display:flex;gap:12px;background:#1e2a3a;"><span>F14A</span><span>pay_api</span><span>http://f14...</span><span>OK</span></div>
+            <div style="padding:3px 6px;font-size:9px;color:#68d391;display:flex;gap:12px;"><span>F18B</span><span>pay_api</span><span>http://f18...</span><span>OK</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:4px;font-size:9px;color:#a0aec0;text-align:center;">← 執行後側欄收起，結果全寬顯示</div>
+    </div>
+    <div class="card-body">
+      <h3>C — 可收合側欄</h3>
+      <p>執行前展開左側控制欄；執行後自動收合，結果區全寬顯示。點箭頭可重新展開修改 SQL。</p>
+    </div>
+  </div>
+
+</div>
