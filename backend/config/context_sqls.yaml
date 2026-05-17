@@ -1,0 +1,39 @@
+sqls:
+  - id: failed-cpnt-recent
+    name: 查詢最近失敗的 Cpnt
+    description: 依天數查詢最近有執行失敗記錄的 Cpnt 與錯誤訊息
+    sql: |
+      SELECT c.name, e.error_msg, e.fail_time
+      FROM cpnt c JOIN cpnt_execution_log e ON c.id = e.cpnt_id
+      WHERE e.status = 'FAILED' AND e.fail_time > SYSDATE - :days
+      ORDER BY e.fail_time DESC
+    params:
+      - name: days
+        label: 天數
+        type: integer
+        default: 7
+
+  - id: active-cpnts
+    name: 查詢啟用中的 Cpnt
+    description: 列出所有狀態為 ACTIVE 的 Cpnt 設定
+    sql: |
+      SELECT c.name, c.api_url, c.method, c.created_at
+      FROM cpnt c
+      WHERE c.status = 'ACTIVE'
+      ORDER BY c.name
+
+  - id: sop-cpnt-mapping
+    name: SOP 與 Cpnt 對應關係
+    description: 查詢特定 SOP 呼叫了哪些 Cpnt
+    sql: |
+      SELECT s.name AS sop_name, c.name AS cpnt_name, sc.step_order
+      FROM sop s
+      JOIN sop_cpnt sc ON s.id = sc.sop_id
+      JOIN cpnt c ON sc.cpnt_id = c.id
+      WHERE s.name LIKE :sop_pattern
+      ORDER BY s.name, sc.step_order
+    params:
+      - name: sop_pattern
+        label: SOP 名稱（支援 % 萬用字元）
+        type: string
+        default: "%"
