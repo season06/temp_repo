@@ -1,0 +1,20 @@
+version: "3.9"
+services:
+  backend:
+    build: ./backend
+    ports: ["8080:8080"]
+    env_file: .env
+    depends_on: [sidecar-test]
+
+  sidecar-test:
+    build: ./sidecar
+    environment:
+      ORACLE_USER: ${ORACLE_USER}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      ORACLE_DSN: ${ORACLE_TEST_DSN}
+    ports: ["8001:8000"]
+
+  frontend:
+    build: ./frontend
+    ports: ["4200:80"]
+    depends_on: [backend]
