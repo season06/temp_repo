@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 	"isop-cpnt/backend/internal/console"
 	"isop-cpnt/backend/internal/fabquery"
 )
@@ -87,5 +90,44 @@ func TestExecute_ValidRequestReturnsQueryId(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["queryId"] == "" {
 		t.Error("expected queryId in response")
+	}
+}
+
+func TestStream_SendsSSEEvents(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"columns": []string{"name"},
+			"rows":    []map[string]interface{}{{"name": "cpnt_a"}},
+		})
+	}))
+	defer srv.Close()
+
+	engine := fabquery.NewEngine(map[string]string{"F12A": srv.URL}, 5)
+	testDB := &stubTestDB{err: nil}
+	h := console.NewHandler(engine, testDB, nil)
+
+	// First: create query
+	w := postExecute(t, h, map[string]interface{}{
+		"sql": "SELECT name FROM cpnt", "fabs": []string{"F12A"}, "rowLimit": 10,
+	})
+	var execResp map[string]string
+	json.NewDecoder(w.Body).Decode(&execResp)
+	queryID := execResp["queryId"]
+
+	// Then: stream it
+	req := httptest.NewRequest(http.MethodGet, "/api/fabs/stream/"+queryID, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", queryID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	streamW := httptest.NewRecorder()
+	h.Stream(streamW, req)
+
+	body := streamW.Body.String()
+	if !strings.Contains(body, "fab_result") {
+		t.Errorf("expected fab_result event, got:\n%s", body)
+	}
+	if !strings.Contains(body, "done") {
+		t.Errorf("expected done event, got:\n%s", body)
 	}
 }
