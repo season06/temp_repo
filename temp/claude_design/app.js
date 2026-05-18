@@ -306,14 +306,20 @@ $('#bannerClose').addEventListener('click', () => {
 });
 
 /* ---------------- view tabs ---------------- */
+function setActiveTab() {
+  $$('.tab[data-view]').forEach(x => x.classList.toggle('active', x.dataset.view === state.view));
+  const diffBtn = $('#diffBtn');
+  if (diffBtn) diffBtn.classList.toggle('active', state.view === 'diff');
+}
+
 $$('.tab[data-view]').forEach(t => t.addEventListener('click', () => {
   state.view = t.dataset.view;
-  $$('.tab[data-view]').forEach(x => x.classList.toggle('active', x === t));
+  setActiveTab();
   renderResults();
 }));
 $('#diffBtn').addEventListener('click', () => {
-  state.diffOn = !state.diffOn;
-  $('#diffBtn').classList.toggle('active', state.diffOn);
+  state.view = 'diff';
+  setActiveTab();
   renderResults();
 });
 
@@ -594,7 +600,103 @@ function renderPivot() {
     </div>`;
 }
 
-/* ---------------- diff panel ---------------- */
+/* ---------------- diff view (card layout) ---------------- */
+function renderDiffView() {
+  const rows = okRows();
+  if (rows.length === 0) {
+    return `
+      <div class="diff-view-empty">
+        <div class="empty-icon">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+            <circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+            <path d="M16 24h16M24 16v16" stroke="currentColor" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="empty-title">No data to compare</div>
+        <div class="empty-sub">Select fabs and run a query to see column diffs.</div>
+      </div>`;
+  }
+
+  const diff = diffColumns();
+  if (diff.size === 0) {
+    return `
+      <div class="diff-view-empty">
+        <div class="empty-icon ok">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+            <circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M16 24l6 6 12-12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </div>
+        <div class="empty-title">All ${window.COLUMNS.length} columns match across ${rows.length} fabs</div>
+        <div class="empty-sub">No divergent values detected. SET(values) = 1 for every column.</div>
+      </div>`;
+  }
+
+  // header summary
+  const summary = `
+    <div class="diff-view-head">
+      <div class="diff-head-l">
+        <div class="diff-head-title">
+          <span class="diff-head-marker"></span>
+          <h2><b>${diff.size}</b> column${diff.size===1?'':'s'} diverge across <b>${rows.length}</b> fabs</h2>
+        </div>
+        <div class="diff-head-sub">Each card lists the distinct values for one column. Groups sorted by fab count.</div>
+      </div>
+      <div class="diff-head-r">
+        <div class="diff-head-stat">
+          <span class="stat-v">${window.COLUMNS.length - diff.size}</span>
+          <span class="stat-l">columns identical</span>
+        </div>
+        <div class="diff-head-stat warn">
+          <span class="stat-v">${diff.size}</span>
+          <span class="stat-l">columns differ</span>
+        </div>
+      </div>
+    </div>`;
+
+  // cards
+  const cards = [...diff].map(col => {
+    const groups = new Map();
+    rows.forEach(r => {
+      const v = String(r.data[col]);
+      if (!groups.has(v)) groups.set(v, []);
+      groups.get(v).push(r.fab);
+    });
+    const grouped = [...groups.entries()].sort((a,b) => b[1].length - a[1].length);
+    const totalFabs = rows.length;
+
+    return `
+      <div class="diff-vcard">
+        <div class="diff-vcard-head">
+          <div class="diff-vcard-name">
+            <span class="marker"></span>
+            <span class="col-name">${col.toUpperCase()}</span>
+          </div>
+          <div class="diff-vcard-meta">${groups.size} distinct values</div>
+        </div>
+        <div class="diff-vcard-body">
+          ${grouped.map(([v, fabs], idx) => {
+            const isMajority = idx === 0;
+            const rendered = pillFor(col, v) ?? `<span class="val-text">${v === 'null' || v === 'undefined' ? '<i class="null">∅ null</i>' : v}</span>`;
+            return `
+              <div class="diff-vrow ${isMajority?'majority':''}">
+                <div class="diff-vrow-val">${rendered}</div>
+                <div class="diff-vrow-count"><b>${fabs.length}</b><span class="of">/${rows.length}</span></div>
+                <div class="diff-vrow-fabs">
+                  ${fabs.map(f => `<span class="vfab">${f}</span>`).join('')}
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="diff-view">
+      ${summary}
+      <div class="diff-vgrid">${cards}</div>
+    </div>`;
+}
 function renderDiffPanel() {
   if (!state.diffOn) return '';
   const diff = diffColumns();
@@ -657,10 +759,28 @@ function renderResults() {
   renderTabCounts();
   renderChips();
   const host = $('#resultsHost');
-  if (state.view === 'flat')   host.innerHTML = renderFlat();
-  else if (state.view === 'pivot') host.innerHTML = renderPivot();
+  const diffHost = $('#diffPanelHost');
 
-  // wire column header click → filter popover
+  if (state.view === 'flat') {
+    host.innerHTML = renderFlat();
+    if (diffHost) diffHost.innerHTML = renderDiffPanel();
+  } else if (state.view === 'pivot') {
+    host.innerHTML = renderPivot();
+    if (diffHost) diffHost.innerHTML = renderDiffPanel();
+  } else if (state.view === 'diff') {
+    host.innerHTML = renderDiffView();
+    if (diffHost) diffHost.innerHTML = '';
+  }
+
+  // wire diff-panel mini/expand controls (only when flat/pivot rendered the under-table panel)
+  if (state.view !== 'diff' && diffHost) {
+    const mini = $('#diffMini');
+    if (mini) mini.addEventListener('click', () => { state.diffPanelOpen = true; renderResults(); });
+    const collapse = $('#diffCollapse');
+    if (collapse) collapse.addEventListener('click', () => { state.diffPanelOpen = false; renderResults(); });
+  }
+
+  // wire column header click → filter popover (only when table is rendered)
   host.querySelectorAll('.dt thead th[data-col]').forEach(th => {
     th.style.cursor = 'pointer';
     th.addEventListener('click', (e) => {
@@ -673,16 +793,6 @@ function renderResults() {
       }
     });
   });
-
-  // diff panel goes into its own host
-  const diffHost = $('#diffPanelHost');
-  if (diffHost) {
-    diffHost.innerHTML = renderDiffPanel();
-    const mini = $('#diffMini');
-    if (mini) mini.addEventListener('click', () => { state.diffPanelOpen = true; renderResults(); });
-    const collapse = $('#diffCollapse');
-    if (collapse) collapse.addEventListener('click', () => { state.diffPanelOpen = false; renderResults(); });
-  }
 
   // footer
   const ok = okRows().length;
@@ -698,6 +808,7 @@ renderFabs();
 renderScenarios();
 renderParams();
 renderSql();
+setActiveTab();
 renderResults();
 
 // expose for tweaks.js

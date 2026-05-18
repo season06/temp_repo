@@ -793,7 +793,7 @@ select.input {
   border-color: var(--accent);
   font-weight: 600;
 }
-.btn.primary:hover { background: #d4ff45; border-color: #d4ff45; }
+.btn.primary:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
 .btn .kbd {
   font-family: var(--mono);
   font-size: 9.5px;

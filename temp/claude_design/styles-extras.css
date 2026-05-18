@@ -68,7 +68,8 @@ body.theme-light .iconbtn.active {
   border-color: #1a1d24;
 }
 body.theme-light .tab.active .count-pill {
-  color: #1a1d24;
+  background: rgba(255,255,255,0.22);
+  color: var(--accent-ink);
 }
 body.theme-light .named-params {
   border-left-color: #1a1d24;
@@ -700,4 +701,381 @@ body.theme-light .tweak-swatch .nm { color: rgba(255,255,255,0.85); }
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--fg-4);
+}
+
+
+/* ============================================================
+   Diff View — dedicated card layout (active when state.view === 'diff')
+   ============================================================ */
+.diff-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  background: var(--ink-0);
+}
+
+.diff-view-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+.diff-head-l { min-width: 0; flex: 1; }
+.diff-head-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.diff-head-marker {
+  width: 8px; height: 8px;
+  background: var(--amber);
+  border-radius: 1px;
+  flex: none;
+}
+.diff-head-title h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg-1);
+  letter-spacing: -0.005em;
+}
+.diff-head-title h2 b {
+  color: var(--amber);
+  font-weight: 600;
+}
+.diff-head-sub {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  letter-spacing: 0.02em;
+  padding-left: 18px;
+}
+
+.diff-head-r {
+  display: flex;
+  gap: 18px;
+  flex: none;
+}
+.diff-head-stat {
+  text-align: right;
+  border-left: 1px solid var(--line);
+  padding-left: 18px;
+}
+.diff-head-stat .stat-v {
+  display: block;
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--fg-0);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.diff-head-stat .stat-l {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--fg-3);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.diff-head-stat.warn .stat-v { color: var(--amber); }
+
+/* card grid */
+.diff-vgrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+@media (min-width: 1200px) {
+  .diff-vgrid { grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 1700px) {
+  .diff-vgrid { grid-template-columns: 1fr 1fr 1fr; }
+}
+
+.diff-vcard {
+  background: var(--ink-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.diff-vcard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 14px;
+  background: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid var(--amber);
+}
+.diff-vcard-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.diff-vcard-name .marker {
+  width: 6px; height: 6px;
+  background: var(--amber);
+  border-radius: 1px;
+}
+.diff-vcard-name .col-name {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--amber);
+}
+.diff-vcard-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: 0.04em;
+}
+
+.diff-vcard-body {
+  padding: 0;
+}
+.diff-vrow {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 64px minmax(180px, 2fr);
+  gap: 14px;
+  align-items: center;
+  padding: 9px 14px;
+  border-bottom: 1px dashed var(--line-soft);
+}
+.diff-vrow:last-child { border-bottom: none; }
+.diff-vrow:hover { background: var(--ink-2); }
+
+.diff-vrow-val {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.diff-vrow-val .val-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+.diff-vrow-val .null {
+  color: var(--fg-4);
+  font-style: italic;
+}
+.diff-vrow.majority .diff-vrow-val {
+  color: var(--fg-0);
+  font-weight: 500;
+}
+
+.diff-vrow-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--ink-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: var(--fg-3);
+  border-radius: 3px;
+  transition: width .25s ease;
+}
+.diff-vrow.majority .bar-fill {
+  background: var(--accent);
+}
+.bar-count {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-2);
+  white-space: nowrap;
+  min-width: 36px;
+  text-align: right;
+}
+.bar-count b { color: var(--fg-0); font-weight: 600; }
+.bar-count .of { color: var(--fg-4); }
+
+.diff-vrow-fabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  justify-content: flex-start;
+}
+.vfab {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  background: var(--ink-3);
+  color: var(--fg-2);
+  border-radius: 2px;
+  border: 1px solid var(--line);
+}
+.diff-vrow.majority .vfab {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 500;
+}
+
+/* empty state */
+.diff-view-empty {
+  flex: 1;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+}
+.diff-view-empty .empty-icon {
+  color: var(--fg-3);
+  margin-bottom: 8px;
+}
+.diff-view-empty .empty-icon.ok { color: var(--teal); }
+.empty-title {
+  font-size: 14px;
+  color: var(--fg-1);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+.empty-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.02em;
+}
+
+/* Diff view: hide the under-table mini diff panel */
+.diff-view ~ #diffPanelHost,
+body[data-view="diff"] #diffPanelHost { display: none; }
+
+
+/* ============================================================
+   Light-theme contrast overrides (fix dark-mode color leaks)
+   ============================================================ */
+
+/* diff cells in flat/pivot tables — dark amber text on light amber bg */
+body.theme-light .dt td.diff-cell {
+  color: #6b3a08;
+}
+body.theme-light .pivot tbody tr.diff td.val.diff-cell {
+  color: #6b3a08;
+}
+
+/* failure banner — dark rose text on light rose bg */
+body.theme-light .banner {
+  color: #5a0d14;
+  border-color: #c8636c;
+  background: #fae6e9;
+  border-left: 3px solid #b8323a;
+}
+body.theme-light .banner .icon { color: #b8323a; }
+body.theme-light .banner-text {
+  color: #4a0810;
+  font-weight: 500;
+}
+body.theme-light .banner-text b {
+  color: #2a050a;
+  font-weight: 600;
+}
+body.theme-light .banner-text .err-list .pill {
+  background: #fff;
+  color: #5a0d14;
+  border: 1px solid #c8636c;
+  font-weight: 500;
+}
+body.theme-light .banner-text .err-list .pill:hover {
+  background: #fff5f7;
+  color: #2a050a;
+}
+body.theme-light .banner-close { color: #8a1a22; }
+body.theme-light .banner-close:hover { color: #2a050a; }
+
+/* failed row error cell in table */
+body.theme-light .dt tbody tr.failed td.err-cell {
+  color: #8a1a22;
+}
+body.theme-light .dt tbody tr.failed td.fab-cell .fab-cell-name {
+  color: #8a1a22;
+}
+body.theme-light .dt tbody tr.failed td.fab-cell .fab-cell-ms {
+  color: #8a1a22;
+  opacity: 0.7;
+}
+
+/* pivot err val */
+body.theme-light .pivot tbody td.val.err-val {
+  color: #8a1a22;
+}
+
+/* row-status err in light mode */
+body.theme-light .row-status.err {
+  color: #8a1a22;
+}
+
+/* pills inside table (Y/N enabled, OAUTH2/BASIC) — ensure light-mode contrast */
+body.theme-light .pill.ok    { background: #d6efe5; color: #155c40; }
+body.theme-light .pill.warn  { background: #fbeacc; color: #7a4a0c; }
+body.theme-light .pill.bad   { background: #fadcdf; color: #8a1a22; }
+
+/* diff card amber values in light mode */
+body.theme-light .diff-vrow-val .null,
+body.theme-light .dt td .null,
+body.theme-light .pivot td .null {
+  color: #9aa1b0;
+}
+
+/* diff mini bar — make sure column pills are readable */
+body.theme-light .diff-mini-col {
+  background: #fbeacc;
+  color: #7a4a0c;
+}
+
+/* diff card head amber on light cream — already OK because var(--amber) is dark amber in light theme.
+   But just in case the col-name was too light: */
+body.theme-light .diff-vcard-name .col-name {
+  color: #7a4a0c;
+}
+body.theme-light .diff-vcard-head {
+  border-left-color: #b6701f;
+}
+body.theme-light .diff-vcard-name .marker {
+  background: #b6701f;
+}
+
+
+/* simple count column (replaces progress bar) */
+.diff-vrow-count {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg-2);
+  text-align: right;
+  white-space: nowrap;
+}
+.diff-vrow-count b {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+.diff-vrow-count .of {
+  color: var(--fg-4);
+}
+.diff-vrow.majority .diff-vrow-count b {
+  color: var(--accent);
 }
