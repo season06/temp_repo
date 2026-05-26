@@ -81,6 +81,10 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errorResponse{err.Error()})
 		return
 	}
+	if err := fabquery.ValidateNoStarColumns(req.SQL); err != nil {
+		writeJSON(w, 400, errorResponse{err.Error()})
+		return
+	}
 	if len(req.Fabs) == 0 {
 		writeJSON(w, 400, errorResponse{"at least one fab required"})
 		return
