@@ -10,7 +10,7 @@ mock_pool.acquire.return_value = mock_conn
 mock_conn.cursor.return_value = mock_cursor
 
 with patch.dict("sys.modules", {"cx_Oracle": MagicMock(SessionPool=MagicMock(return_value=mock_pool))}):
-    from main import app  # noqa: E402
+    from main import app, validate_select_only, validate_no_star  # noqa: E402
 
 client = TestClient(app)
 
@@ -41,3 +41,42 @@ def test_health_ok():
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+# --- validate_select_only ---
+
+def test_validate_select_only_valid():
+    assert validate_select_only("SELECT id FROM cpnt") is None
+    assert validate_select_only("select name FROM sop WHERE id = :id") is None
+    assert validate_select_only("  \n  SELECT col FROM tbl") is None
+    assert validate_select_only("WITH cte AS (SELECT 1 FROM dual) SELECT * FROM cte") is None
+    assert validate_select_only("WITH cte AS (SELECT id FROM cpnt) SELECT id FROM cte") is None
+
+
+def test_validate_select_only_invalid():
+    assert validate_select_only("INSERT INTO cpnt VALUES (1)") is not None
+    assert validate_select_only("UPDATE cpnt SET name = 'x'") is not None
+    assert validate_select_only("DELETE FROM cpnt") is not None
+    assert validate_select_only("DROP TABLE cpnt") is not None
+    assert validate_select_only("WITH cte AS (SELECT 1 FROM dual) DELETE FROM cpnt") is not None
+    assert validate_select_only("WITH cte AS (SELECT 1 FROM dual) UPDATE cpnt SET name = 'x'") is not None
+    assert validate_select_only("WITH cte AS (SELECT 1 FROM dual) INSERT INTO cpnt VALUES (1)") is not None
+
+
+# --- validate_no_star ---
+
+def test_validate_no_star_valid():
+    assert validate_no_star("SELECT id, name FROM cpnt") is None
+    assert validate_no_star("SELECT price * 2 FROM tbl") is None
+    assert validate_no_star("SELECT (a+b) * c FROM tbl") is None
+    assert validate_no_star("SELECT a * b FROM tbl") is None
+
+
+def test_validate_no_star_invalid():
+    assert validate_no_star("SELECT * FROM cpnt") is not None
+    assert validate_no_star("SELECT t.* FROM cpnt t") is not None
+    assert validate_no_star("SELECT COUNT(*) FROM cpnt") is not None
+    assert validate_no_star("SELECT *, id FROM cpnt") is not None
+    assert validate_no_star("SELECT col FROM (SELECT * FROM tbl)") is not None
+    assert validate_no_star("WITH cte AS (SELECT * FROM t) SELECT id FROM cte") is not None
+    assert validate_no_star("WITH cte AS (SELECT t.* FROM t) SELECT id FROM cte") is not None
