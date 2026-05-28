@@ -7,21 +7,25 @@ alert_ingestion (LLM_CHAT_COMPLETE)
         ↓
 analyze_alert (LLM_CHAT_COMPLETE)
         ↓
-doc_search (LLM_SEARCH_INDEX)          ← Vector DB runbook retrieval
+fork_data_gathering (FORK_JOIN)
+   ├─ doc_search (LLM_SEARCH_INDEX, optional)    ← Vector DB runbook retrieval
+   └─ query_prometheus (CALL_MCP_TOOL, optional) ← Live metric data from Prometheus MCP
         ↓
-investigation (LLM_CHAT_COMPLETE)
+join_data_gathering (JOIN)
         ↓
-risk_assessment (LLM_CHAT_COMPLETE)    ← outputs: HIGH | MEDIUM | LOW
+investigation (LLM_CHAT_COMPLETE)              ← now includes Prometheus metric data
+        ↓
+risk_assessment (LLM_CHAT_COMPLETE)            ← outputs: HIGH | MEDIUM | LOW
         ↓
 decision_router (SWITCH, javascript)
    ├─ HIGH or MEDIUM → human_review (HUMAN task)
    └─ LOW (default) → ai_auto_execute (LLM_CHAT_COMPLETE)
         ↓
-join_review (EXCLUSIVE_JOIN)           ← merges both review branches
+join_review (EXCLUSIVE_JOIN)
         ↓
 trigger_action_workflow (START_WORKFLOW)   ← always fires alert_action_executor
         ↓
-verification (LLM_CHAT_COMPLETE)       ← confirms sub-workflow triggered
+verification (LLM_CHAT_COMPLETE)           ← confirms sub-workflow triggered
 ```
 
 ### `alert_action_executor` sub-workflow (scenario: send-mail)
@@ -143,7 +147,7 @@ Defined in `alert_action_executor_workflow.json`. Can be swapped for different a
 | Field             | Value                    |
 |-------------------|--------------------------|
 | `name`            | `auto_alert_recovery`    |
-| `version`         | `1`                      |
+| `version`         | `2`                      |
 | `schemaVersion`   | `2`                      |
 | `timeoutSeconds`  | `3600`                   |
 | `timeoutPolicy`   | `TIME_OUT_WF`            |

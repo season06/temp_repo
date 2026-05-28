@@ -1,6 +1,6 @@
 {
   "name": "auto_alert_recovery",
-  "version": 1,
+  "version": 2,
   "description": "Automated alert triage and recovery: ingests an alert, uses AI to analyze and investigate it with vector DB runbook search, assesses risk, routes HIGH/MEDIUM to human review and LOW to AI auto-execution, then always triggers an action sub-workflow.",
   "schemaVersion": 2,
   "ownerEmail": "kilicapeto@gmail.com",
@@ -19,7 +19,8 @@
     "vector_db_provider",
     "vector_db_namespace",
     "vector_db_index",
-    "recipient_email"
+    "recipient_email",
+    "prometheus_mcp_url"
   ],
   "outputParameters": {
     "alertname": "${alert_ingestion_ref.output.result.alertname}",
@@ -74,20 +75,55 @@
       }
     },
     {
-      "name": "doc_search",
-      "taskReferenceName": "doc_search_ref",
-      "type": "LLM_SEARCH_INDEX",
-      "description": "Search vector DB for relevant runbooks and past incident reports",
-      "optional": true,
-      "inputParameters": {
-        "vectorDB": "${workflow.input.vector_db_provider}",
-        "namespace": "${workflow.input.vector_db_namespace}",
-        "index": "${workflow.input.vector_db_index}",
-        "query": "${analyze_alert_ref.output.result.summary}",
-        "llmMaxResults": 5,
-        "embeddingModelProvider": "${workflow.input.llm_provider}",
-        "embeddingModel": "${workflow.input.embedding_model}"
-      }
+      "name": "fork_data_gathering",
+      "taskReferenceName": "fork_data_gathering_ref",
+      "type": "FORK_JOIN",
+      "description": "Run runbook search and Prometheus metric query in parallel",
+      "forkTasks": [
+        [
+          {
+            "name": "doc_search",
+            "taskReferenceName": "doc_search_ref",
+            "type": "LLM_SEARCH_INDEX",
+            "description": "Search vector DB for relevant runbooks and past incident reports",
+            "optional": true,
+            "inputParameters": {
+              "vectorDB": "${workflow.input.vector_db_provider}",
+              "namespace": "${workflow.input.vector_db_namespace}",
+              "index": "${workflow.input.vector_db_index}",
+              "query": "${analyze_alert_ref.output.result.summary}",
+              "llmMaxResults": 5,
+              "embeddingModelProvider": "${workflow.input.llm_provider}",
+              "embeddingModel": "${workflow.input.embedding_model}"
+            }
+          }
+        ],
+        [
+          {
+            "name": "query_prometheus",
+            "taskReferenceName": "query_prometheus_ref",
+            "type": "CALL_MCP_TOOL",
+            "description": "Query Prometheus for live metric data using the extracted PromQL expression",
+            "optional": true,
+            "inputParameters": {
+              "mcpServer": "${workflow.input.prometheus_mcp_url}",
+              "method": "promql_query_range",
+              "arguments": {
+                "expr": "${alert_ingestion_ref.output.result.promql}",
+                "start": "${alert_ingestion_ref.output.result.startsAt}",
+                "duration_minutes": 30
+              }
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "join_data_gathering",
+      "taskReferenceName": "join_prometheus_ref",
+      "type": "JOIN",
+      "description": "Wait for both doc_search and query_prometheus to complete",
+      "joinOn": ["doc_search_ref", "query_prometheus_ref"]
     },
     {
       "name": "investigation",
@@ -106,7 +142,7 @@
           },
           {
             "role": "user",
-            "message": "Alert Analysis: ${analyze_alert_ref.output.result}\nRelevant Runbooks: ${doc_search_ref.output.result}"
+            "message": "Alert Analysis: ${analyze_alert_ref.output.result}\nRelevant Runbooks: ${doc_search_ref.output.result}\nPrometheus Metric Data: ${query_prometheus_ref.output.content}"
           }
         ]
       }

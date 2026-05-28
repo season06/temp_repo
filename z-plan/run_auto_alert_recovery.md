@@ -3,7 +3,7 @@
 ## Endpoint
 
 ```
-POST http://localhost:8000/api/workflow/execute/auto_alert_recovery/1
+POST http://localhost:8000/api/workflow/execute/auto_alert_recovery/2
 Content-Type: application/json
 ```
 
@@ -14,14 +14,14 @@ Body must be a `StartWorkflowRequest` — alert payload and config go inside `"i
 ## Full Example — AlertManager Webhook Payload
 
 ```bash
-curl -X POST http://localhost:8000/api/workflow/execute/auto_alert_recovery/1 \
+curl -X POST http://localhost:8000/api/workflow/execute/auto_alert_recovery/2 \
   -H "Content-Type: application/json" \
   -d '{
     "name": "auto_alert_recovery",
-    "version": 1,
+    "version": 2,
     "input": {
       "alert_source": "alertmanager",
-      "alert_payload": "{\"version\":\"4\",\"status\":\"firing\",\"groupLabels\":{\"alertname\":\"HighCPUUsage\"},\"commonLabels\":{\"alertname\":\"HighCPUUsage\",\"severity\":\"critical\",\"cluster\":\"prod-cluster\"},\"commonAnnotations\":{\"summary\":\"High CPU usage detected across multiple instances\"},\"externalURL\":\"http://alertmanager.example.com\",\"alerts\":[{\"status\":\"firing\",\"labels\":{\"alertname\":\"HighCPUUsage\",\"severity\":\"critical\",\"cluster\":\"prod-cluster\",\"instance\":\"web-server-01\"},\"annotations\":{\"description\":\"CPU usage on web-server-01 is at 95% for more than 5 minutes.\"},\"startsAt\":\"2023-10-27T10:00:00.000Z\",\"generatorURL\":\"http://prometheus.example.com/graph?g0.expr=100+%2A+%281+-+avg+by%28instance%29+%28irate%28node_cpu_seconds_total%7Bmode%3D%22idle%22%7D%5B5m%5D%29%29+%3E+90\",\"fingerprint\":\"a1b2c3d4e5f6g7h8\"}]}",
+      "alert_payload": "{\"version\":\"4\",\"status\":\"firing\",\"groupLabels\":{\"alertname\":\"HighCPUUsage\"},\"commonLabels\":{\"alertname\":\"HighCPUUsage\",\"severity\":\"critical\",\"cluster\":\"prod-cluster\"},\"commonAnnotations\":{\"summary\":\"High CPU usage detected across multiple instances\"},\"externalURL\":\"http://alertmanager.example.com\",\"alerts\":[{\"status\":\"firing\",\"labels\":{\"alertname\":\"HighCPUUsage\",\"severity\":\"critical\",\"cluster\":\"prod-cluster\",\"instance\":\"web-server-01\"},\"annotations\":{\"description\":\"CPU usage on web-server-01 is at 95% for more than 5 minutes.\"},\"startsAt\":\"2023-10-27T10:00:00.000Z\",\"generatorURL\":\"http://prometheus.example.com/graph?g0.expr=100+%2A+%281+-+avg+by%28instance%29+%28irate%28node_cpu_seconds_total%7Bmode%3D%22idle%22%7D%5B5m%5D%29%29%29+%3E+90\",\"fingerprint\":\"a1b2c3d4e5f6g7h8\"}]}",
       "llm_provider": "openai",
       "llm_model": "gpt-4o-mini",
       "embedding_model": "text-embedding-3-small",
@@ -38,7 +38,7 @@ curl -X POST http://localhost:8000/api/workflow/execute/auto_alert_recovery/1 \
 If your alert payload is a JSON file (e.g. `alert_payload.json`), use Python to embed it cleanly:
 
 ```bash
-curl -X POST http://localhost:8000/api/workflow/execute/auto_alert_recovery/1 \
+curl -X POST http://localhost:8000/api/workflow/execute/auto_alert_recovery/2 \
   -H "Content-Type: application/json" \
   -d "$(python3 -c "
 import json
