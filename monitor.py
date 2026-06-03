@@ -19,12 +19,18 @@ class Task:
 
 
 @dataclass(frozen=True)
-class Release:
-    """A release entry pointing at its root task."""
+class ReleaseTaskDef:
+    """One task slot inside a release pipeline. Provides name↔id mapping."""
     id: int
     name: str
-    root_task_id: int
-    root_task_name: str
+
+
+@dataclass(frozen=True)
+class Release:
+    """Release metadata. `available_tasks` lists every task triggerable from this pipeline."""
+    id: int
+    name: str
+    available_tasks: list[ReleaseTaskDef]
 
 
 @dataclass(frozen=True)
