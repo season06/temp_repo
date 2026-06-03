@@ -288,24 +288,39 @@ class LiveWriter:
         self._previous_line_count = len(lines)
 
 
-# PROD PORTABLE with one prod change: replace release_info with the real
-# release/task list source before calling poll_active_tasks().
-def main() -> None:
-    """Run the monitoring loop until all monitored tasks terminate."""
+# PROD PORTABLE: independent render heartbeat. Keeps rendering while any runner is alive.
+async def render_loop(runners: list, tasks: dict, writer: LiveWriter) -> None:
+    while not all(r.is_done() for r in runners):
+        writer.write(render_monitoring(runners, tasks))
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+    writer.write(render_monitoring(runners, tasks))  # final paint
+
+
+# PROD PORTABLE with one prod change: replace be_trigger_release with real input source.
+async def main() -> None:
+    """Run the trigger-and-monitor loop until every release's queue is drained."""
+    be_trigger_release: list = [
+        ("release-1", ["task-a", "task-c"]),
+    ]
+
+    releases = await get_release_metadata()
+    runners = [
+        ReleaseRunner.from_input(release_name, task_names, releases)
+        for release_name, task_names in be_trigger_release
+    ]
+
     tasks: dict = {}
     writer = LiveWriter()
     print("===Start===")
 
-    while True:
-        releases = get_release_info()
-        poll_active_tasks(releases, tasks)
-        writer.write(render_monitoring(releases, tasks))
-
-        if all_tasks_terminated(tasks):
-            break
-
-        time.sleep(2)
+    try:
+        await asyncio.gather(
+            *(r.run(tasks) for r in runners),
+            render_loop(runners, tasks, writer),
+        )
+    except KeyboardInterrupt:
+        print("\n===Cancelled===")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -4,15 +4,36 @@
       "release_id": 1,
       "release_name": "release-1",
       "available_tasks": [
-        { "task_id": 101, "task_name": "task-a" },
-        { "task_id": 102, "task_name": "task-b" },
-        { "task_id": 201, "task_name": "task-c" }
+        {
+          "task_id": 101,
+          "task_name": "task-a"
+        },
+        {
+          "task_id": 102,
+          "task_name": "task-b"
+        },
+        {
+          "task_id": 201,
+          "task_name": "task-c"
+        }
       ]
     }
   ],
   "tasks": {
-    "101": { "status": "NotStarted", "dependency_task_id": 102, "dependency_task_name": "task-b" },
-    "102": { "status": "NotStarted", "dependency_task_id": null, "dependency_task_name": null },
-    "201": { "status": "NotStarted", "dependency_task_id": null, "dependency_task_name": null }
+    "101": {
+      "status": "NotStarted",
+      "dependency_task_id": 102,
+      "dependency_task_name": "task-b"
+    },
+    "102": {
+      "status": "NotStarted",
+      "dependency_task_id": null,
+      "dependency_task_name": null
+    },
+    "201": {
+      "status": "NotStarted",
+      "dependency_task_id": null,
+      "dependency_task_name": null
+    }
   }
 }
