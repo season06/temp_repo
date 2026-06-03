@@ -2,42 +2,17 @@
   "releases": [
     {
       "release_id": 1,
-      "release_name": "test_release",
-      "task_id": 101,
-      "task_name": "task-A"
-    },
-    {
-      "release_id": 2,
-      "release_name": "test_release_2",
-      "task_id": 201,
-      "task_name": "task-1"
+      "release_name": "release-1",
+      "available_tasks": [
+        { "task_id": 101, "task_name": "task-a" },
+        { "task_id": 102, "task_name": "task-b" },
+        { "task_id": 201, "task_name": "task-c" }
+      ]
     }
   ],
   "tasks": {
-    "101": {
-      "status": "Successed",
-      "dependency_task_id": 102,
-      "dependency_task_name": "task-B"
-    },
-    "102": {
-      "status": "InProgress",
-      "dependency_task_id": 103,
-      "dependency_task_name": "task-C"
-    },
-    "103": {
-      "status": "NotStarted",
-      "dependency_task_id": null,
-      "dependency_task_name": null
-    },
-    "201": {
-      "status": "NotStarted",
-      "dependency_task_id": 202,
-      "dependency_task_name": "hi"
-    },
-    "202": {
-      "status": "NotStarted",
-      "dependency_task_id": null,
-      "dependency_task_name": null
-    }
+    "101": { "status": "NotStarted", "dependency_task_id": 102, "dependency_task_name": "task-b" },
+    "102": { "status": "NotStarted", "dependency_task_id": null, "dependency_task_name": null },
+    "201": { "status": "NotStarted", "dependency_task_id": null, "dependency_task_name": null }
   }
 }
