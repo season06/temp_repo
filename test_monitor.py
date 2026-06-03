@@ -144,5 +144,40 @@ class DataModelTests(unittest.TestCase):
             td.id = 999
 
 
+class ReleaseRunnerConstructionTests(unittest.TestCase):
+    def _release(self):
+        return monitor.Release(
+            id=1,
+            name="release-1",
+            available_tasks=[
+                monitor.ReleaseTaskDef(id=101, name="task-a"),
+                monitor.ReleaseTaskDef(id=201, name="task-c"),
+            ],
+        )
+
+    def test_from_input_resolves_release_and_tasks(self):
+        runner = monitor.ReleaseRunner.from_input(
+            "release-1", ["task-a", "task-c"], [self._release()]
+        )
+        self.assertEqual(runner.release.name, "release-1")
+        self.assertEqual(runner.trigger_queue, ["task-a", "task-c"])
+        self.assertEqual(runner.triggered, [])
+        self.assertIsNone(runner.active_root_id)
+        self.assertFalse(runner.is_done())
+
+    def test_from_input_raises_on_unknown_release(self):
+        with self.assertRaises(ValueError):
+            monitor.ReleaseRunner.from_input("nope", ["task-a"], [self._release()])
+
+    def test_from_input_raises_on_unknown_task_name(self):
+        with self.assertRaises(ValueError):
+            monitor.ReleaseRunner.from_input("release-1", ["task-x"], [self._release()])
+
+    def test_resolve_name_returns_task_id(self):
+        runner = monitor.ReleaseRunner.from_input("release-1", ["task-a"], [self._release()])
+        self.assertEqual(runner._resolve_name("task-a"), 101)
+        self.assertEqual(runner._resolve_name("task-c"), 201)
+
+
 if __name__ == "__main__":
     unittest.main()

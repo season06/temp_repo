@@ -41,6 +41,38 @@ class TaskUpdate:
     dependency_name: str | None = None
 
 
+@dataclass
+class ReleaseRunner:
+    """Per-release coordinator. Walks `trigger_queue` sequentially, triggering and
+    waiting for each task's cascade chain to reach terminal status."""
+    release: Release
+    trigger_queue: list[str]
+    triggered: list[int]
+    active_root_id: int | None = None
+    _done: bool = False
+
+    @classmethod
+    def from_input(cls, release_name: str, task_names: list[str],
+                   releases: list[Release]) -> "ReleaseRunner":
+        release = next((r for r in releases if r.name == release_name), None)
+        if release is None:
+            raise ValueError(f"unknown release: {release_name}")
+        available_names = {t.name for t in release.available_tasks}
+        for name in task_names:
+            if name not in available_names:
+                raise ValueError(f"task {name!r} not in release {release_name!r}")
+        return cls(release=release, trigger_queue=list(task_names), triggered=[])
+
+    def is_done(self) -> bool:
+        return self._done
+
+    def _resolve_name(self, name: str) -> int:
+        for td in self.release.available_tasks:
+            if td.name == name:
+                return td.id
+        raise ValueError(f"task {name!r} not in release {self.release.name!r}")
+
+
 # MOCK ONLY: read this file on every polling cycle. Edit mock_api.json while the
 # monitor is running to simulate API status updates.
 def read_mock_api_file() -> dict:
