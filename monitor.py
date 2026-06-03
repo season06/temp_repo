@@ -99,6 +99,27 @@ class ReleaseRunner:
                 return
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
+    async def run(self, tasks: dict) -> None:
+        """Walk the trigger queue. Trigger each task and wait for its chain to terminate
+        before moving on. Trigger failures mark the task Error and advance."""
+        for name in self.trigger_queue:
+            tid = self._resolve_name(name)
+            self.active_root_id = tid
+            self.triggered.append(tid)
+            tasks[tid] = Task(id=tid, name=name)
+
+            try:
+                await trigger_task(tid)
+            except Exception:
+                tasks[tid].status = "Error"
+                self.active_root_id = None
+                continue
+
+            await self._wait_chain_terminal(tid, tasks)
+            self.active_root_id = None
+
+        self._done = True
+
 
 # MOCK ONLY: read this file on every polling cycle. Edit mock_api.json while the
 # monitor is running to simulate API status updates.

@@ -271,5 +271,129 @@ class PollChainTests(IsolatedAsyncioTestCase):
         self.assertEqual(tasks[102].status, "NotStarted")
 
 
+class ReleaseRunnerRunTests(IsolatedAsyncioTestCase):
+    def _release(self):
+        return monitor.Release(
+            id=1, name="release-1",
+            available_tasks=[
+                monitor.ReleaseTaskDef(id=101, name="task-a"),
+                monitor.ReleaseTaskDef(id=102, name="task-b"),
+                monitor.ReleaseTaskDef(id=201, name="task-c"),
+            ],
+        )
+
+    async def test_run_triggers_queue_sequentially(self):
+        """trigger order must be [101, 201]; 201 not triggered until 101+cascade terminal."""
+        runner = monitor.ReleaseRunner.from_input(
+            "release-1", ["task-a", "task-c"], [self._release()],
+        )
+        tasks = {}
+
+        trigger_order = []
+
+        async def fake_trigger(tid):
+            trigger_order.append(tid)
+
+        status_table = {
+            101: monitor.TaskUpdate(status="Successed", dependency_id=102, dependency_name="task-b"),
+            102: monitor.TaskUpdate(status="Successed"),
+            201: monitor.TaskUpdate(status="Successed"),
+        }
+
+        async def fake_fetch(task_id):
+            return status_table[task_id]
+
+        with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
+             patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
+            await runner.run(tasks)
+
+        self.assertEqual(trigger_order, [101, 201])
+        self.assertTrue(runner.is_done())
+        self.assertEqual(runner.triggered, [101, 201])
+        self.assertIsNone(runner.active_root_id)
+
+    async def test_run_waits_for_cascade_before_advancing(self):
+        """task-c is not triggered until task-a AND task-b reach terminal."""
+        runner = monitor.ReleaseRunner.from_input(
+            "release-1", ["task-a", "task-c"], [self._release()],
+        )
+        tasks = {}
+
+        trigger_order = []
+        poll_count = {101: 0, 102: 0, 201: 0}
+
+        async def fake_trigger(tid):
+            trigger_order.append(tid)
+
+        async def fake_fetch(task_id):
+            poll_count[task_id] += 1
+            if task_id == 101:
+                return monitor.TaskUpdate(status="Successed", dependency_id=102, dependency_name="task-b")
+            if task_id == 102:
+                if poll_count[102] < 3:
+                    return monitor.TaskUpdate(status="InProgress")
+                return monitor.TaskUpdate(status="Successed")
+            if task_id == 201:
+                return monitor.TaskUpdate(status="Successed")
+
+        async def no_sleep(_):
+            return
+
+        with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
+             patch.object(monitor, "fetch_task_update", side_effect=fake_fetch), \
+             patch.object(monitor.asyncio, "sleep", side_effect=no_sleep):
+            await runner.run(tasks)
+
+        self.assertEqual(trigger_order, [101, 201])
+        self.assertGreaterEqual(poll_count[102], 3)
+
+    async def test_run_continues_after_trigger_failure(self):
+        """trigger_task raises for 101 → task is marked Error, run() advances to 201."""
+        runner = monitor.ReleaseRunner.from_input(
+            "release-1", ["task-a", "task-c"], [self._release()],
+        )
+        tasks = {}
+        trigger_order = []
+
+        async def fake_trigger(tid):
+            trigger_order.append(tid)
+            if tid == 101:
+                raise ConnectionError("simulated")
+
+        async def fake_fetch(task_id):
+            return monitor.TaskUpdate(status="Successed")
+
+        with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
+             patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
+            await runner.run(tasks)
+
+        self.assertEqual(trigger_order, [101, 201])
+        self.assertEqual(tasks[101].status, "Error")
+        self.assertTrue(runner.is_done())
+
+    async def test_run_continues_after_task_failure(self):
+        """task-a returns Failed (terminal) → 201 still triggered."""
+        runner = monitor.ReleaseRunner.from_input(
+            "release-1", ["task-a", "task-c"], [self._release()],
+        )
+        tasks = {}
+        trigger_order = []
+
+        async def fake_trigger(tid):
+            trigger_order.append(tid)
+
+        async def fake_fetch(task_id):
+            if task_id == 101:
+                return monitor.TaskUpdate(status="Failed")
+            return monitor.TaskUpdate(status="Successed")
+
+        with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
+             patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
+            await runner.run(tasks)
+
+        self.assertEqual(trigger_order, [101, 201])
+        self.assertEqual(tasks[101].status, "Failed")
+
+
 if __name__ == "__main__":
     unittest.main()
