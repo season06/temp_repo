@@ -236,31 +236,32 @@ async def poll_task(task):
     return None
 
 
-# PROD PORTABLE: can be reused directly.
-def render_monitoring(releases: list, tasks: dict) -> str:
-    """Render the current monitoring view as terminal text."""
+def render_monitoring(runners: list, tasks: dict) -> str:
+    """Render every release's progress: triggered tasks (with cascade) + pending tail."""
     lines = []
+    for runner in runners:
+        lines.append(f"=== {runner.release.name} ===")
 
-    for release in releases:
-        root = tasks.get(release.root_task_id)
-        root_status = root.status if root else "Waiting"
-        lines.append(f"{release.name} - {release.root_task_name} : {root_status}")
+        for tid in runner.triggered:
+            root = tasks.get(tid)
+            marker = " ◀ active" if tid == runner.active_root_id else ""
+            status = root.status if root else "Waiting"
+            name = root.name if root else "?"
+            lines.append(f"  {name} : {status}{marker}")
 
-        indent = " " * (len(release.name) + 3)
-        seen = {release.root_task_id}
-        current = root
+            indent = "    "
+            current = root
+            seen = {tid}
+            while current and current.dependency_id and current.dependency_id not in seen:
+                seen.add(current.dependency_id)
+                dep = tasks.get(current.dependency_id)
+                dep_status = dep.status if dep else "Waiting"
+                lines.append(f"{indent}|_{current.dependency_name} : {dep_status}")
+                indent += "  "
+                current = dep
 
-        while current and current.dependency_id and current.dependency_name:
-            dep_id = current.dependency_id
-            dep = tasks.get(dep_id)
-            dep_status = dep.status if dep else "Waiting"
-            lines.append(f"{indent}|_{current.dependency_name} : {dep_status}")
-
-            if dep_id in seen:
-                break
-            seen.add(dep_id)
-            indent += "  "
-            current = dep
+        for name in runner.trigger_queue[len(runner.triggered):]:
+            lines.append(f"  {name} : Pending")
 
     return "\n".join(lines)
 

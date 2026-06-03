@@ -9,45 +9,6 @@ from unittest.mock import patch
 import monitor
 
 
-class DependencyTaskTests(unittest.TestCase):
-    @unittest.skip("replaced in Task 6/9")
-    def test_render_monitoring_displays_nested_dependencies(self):
-        releases = [
-            monitor.Release(
-                id=1,
-                name="test_release",
-                root_task_id=101,
-                root_task_name="task-A",
-            )
-        ]
-        tasks = {
-            101: monitor.Task(
-                id=101,
-                name="task-A",
-                status="InProgress",
-                dependency_id=102,
-                dependency_name="task-B",
-            ),
-            102: monitor.Task(
-                id=102,
-                name="task-B",
-                status="InProgress",
-                dependency_id=103,
-                dependency_name="task-C",
-            ),
-            103: monitor.Task(
-                id=103,
-                name="task-C",
-                status="NotStarted",
-            ),
-        }
-
-        output = monitor.render_monitoring(releases, tasks)
-
-        self.assertIn("test_release - task-A : InProgress", output)
-        self.assertIn("|_task-B : InProgress", output)
-        self.assertIn("|_task-C : NotStarted", output)
-
 
 class DataModelTests(unittest.TestCase):
     def test_release_holds_available_tasks(self):
@@ -393,6 +354,58 @@ class ReleaseRunnerRunTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(trigger_order, [101, 201])
         self.assertEqual(tasks[101].status, "Failed")
+
+
+class RenderMonitoringTests(unittest.TestCase):
+    def _release(self):
+        return monitor.Release(
+            id=1, name="release-1",
+            available_tasks=[
+                monitor.ReleaseTaskDef(id=101, name="task-a"),
+                monitor.ReleaseTaskDef(id=102, name="task-b"),
+                monitor.ReleaseTaskDef(id=201, name="task-c"),
+            ],
+        )
+
+    def test_renders_pending_then_active_then_done(self):
+        runner = monitor.ReleaseRunner.from_input(
+            "release-1", ["task-a", "task-c"], [self._release()],
+        )
+        runner.triggered = [101]
+        runner.active_root_id = 101
+        tasks = {
+            101: monitor.Task(id=101, name="task-a", status="InProgress",
+                              dependency_id=102, dependency_name="task-b"),
+            102: monitor.Task(id=102, name="task-b", status="NotStarted"),
+        }
+
+        output = monitor.render_monitoring([runner], tasks)
+
+        self.assertIn("=== release-1 ===", output)
+        self.assertIn("task-a : InProgress ◀ active", output)
+        self.assertIn("|_task-b : NotStarted", output)
+        self.assertIn("task-c : Pending", output)
+
+    def test_renders_completed_task_without_active_marker(self):
+        runner = monitor.ReleaseRunner.from_input(
+            "release-1", ["task-a", "task-c"], [self._release()],
+        )
+        runner.triggered = [101, 201]
+        runner.active_root_id = 201
+        tasks = {
+            101: monitor.Task(id=101, name="task-a", status="Successed",
+                              dependency_id=102, dependency_name="task-b"),
+            102: monitor.Task(id=102, name="task-b", status="Successed"),
+            201: monitor.Task(id=201, name="task-c", status="InProgress"),
+        }
+
+        output = monitor.render_monitoring([runner], tasks)
+        lines = output.splitlines()
+
+        task_a_line = next(line for line in lines if line.strip().startswith("task-a"))
+        task_c_line = next(line for line in lines if line.strip().startswith("task-c"))
+        self.assertNotIn("◀ active", task_a_line)
+        self.assertIn("◀ active", task_c_line)
 
 
 if __name__ == "__main__":
