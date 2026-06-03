@@ -11,68 +11,6 @@ import monitor
 
 class DependencyTaskTests(unittest.TestCase):
     @unittest.skip("replaced in Task 6/9")
-    def test_poll_active_tasks_discovers_nested_dependencies(self):
-        releases = [
-            monitor.Release(
-                id=1,
-                name="test_release",
-                root_task_id=101,
-                root_task_name="task-A",
-            )
-        ]
-        tasks = {}
-        task_info_by_id = {
-            101: {
-                "status": "InProgress",
-                "dependency_task_id": 102,
-                "dependency_task_name": "task-B",
-            },
-            102: {
-                "status": "InProgress",
-                "dependency_task_id": 103,
-                "dependency_task_name": "task-C",
-            },
-            103: {
-                "status": "NotStarted",
-                "dependency_task_id": None,
-                "dependency_task_name": None,
-            },
-        }
-
-        with patch("monitor.get_release_task_info", side_effect=task_info_by_id.__getitem__):
-            monitor.poll_active_tasks(releases, tasks)
-
-        self.assertEqual(set(tasks), {101, 102, 103})
-        self.assertEqual(tasks[101].name, "task-A")
-        self.assertEqual(tasks[102].name, "task-B")
-        self.assertEqual(tasks[103].name, "task-C")
-        self.assertEqual(tasks[103].status, "NotStarted")
-
-    @unittest.skip("replaced in Task 6/9")
-    def test_poll_active_tasks_skips_terminated_tasks(self):
-        releases = [
-            monitor.Release(
-                id=1,
-                name="test_release",
-                root_task_id=101,
-                root_task_name="task-A",
-            )
-        ]
-        tasks = {
-            101: monitor.Task(
-                id=101,
-                name="task-A",
-                status="Successed",
-            )
-        }
-
-        with patch("monitor.get_release_task_info") as get_release_task_info:
-            monitor.poll_active_tasks(releases, tasks)
-
-        get_release_task_info.assert_not_called()
-        self.assertEqual(tasks[101].status, "Successed")
-
-    @unittest.skip("replaced in Task 6/9")
     def test_render_monitoring_displays_nested_dependencies(self):
         releases = [
             monitor.Release(
@@ -109,25 +47,6 @@ class DependencyTaskTests(unittest.TestCase):
         self.assertIn("test_release - task-A : InProgress", output)
         self.assertIn("|_task-B : InProgress", output)
         self.assertIn("|_task-C : NotStarted", output)
-
-    def test_all_tasks_terminated_requires_tasks_and_terminal_statuses(self):
-        self.assertFalse(monitor.all_tasks_terminated({}))
-        self.assertFalse(
-            monitor.all_tasks_terminated(
-                {
-                    101: monitor.Task(id=101, name="task-A", status="Successed"),
-                    102: monitor.Task(id=102, name="task-B", status="InProgress"),
-                }
-            )
-        )
-        self.assertTrue(
-            monitor.all_tasks_terminated(
-                {
-                    101: monitor.Task(id=101, name="task-A", status="Successed"),
-                    102: monitor.Task(id=102, name="task-B", status="Failed"),
-                }
-            )
-        )
 
 
 class DataModelTests(unittest.TestCase):
@@ -278,6 +197,45 @@ class AsyncApiTests(IsolatedAsyncioTestCase):
         update = await monitor.fetch_task_update(999)
         self.assertEqual(update.status, "Error")
         self.assertIsNone(update.dependency_id)
+
+
+class PollTaskAsyncTests(IsolatedAsyncioTestCase):
+    async def test_poll_task_updates_in_place(self):
+        task = monitor.Task(id=101, name="task-a")
+
+        async def fake_fetch(task_id):
+            return monitor.TaskUpdate(status="InProgress", dependency_id=102, dependency_name="task-b")
+
+        with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
+            new_dep = await monitor.poll_task(task)
+
+        self.assertEqual(task.status, "InProgress")
+        self.assertEqual(task.dependency_id, 102)
+        self.assertIsNotNone(new_dep)
+        self.assertEqual(new_dep.id, 102)
+        self.assertEqual(new_dep.name, "task-b")
+
+    async def test_poll_task_skips_when_terminal(self):
+        task = monitor.Task(id=101, name="task-a", status="Successed")
+
+        async def fake_fetch(task_id):
+            raise AssertionError("should not be called")
+
+        with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
+            result = await monitor.poll_task(task)
+
+        self.assertIsNone(result)
+
+    async def test_poll_task_returns_none_when_no_dep(self):
+        task = monitor.Task(id=102, name="task-b")
+
+        async def fake_fetch(task_id):
+            return monitor.TaskUpdate(status="InProgress")
+
+        with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
+            result = await monitor.poll_task(task)
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

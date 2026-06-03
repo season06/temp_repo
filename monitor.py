@@ -173,12 +173,12 @@ async def fetch_task_update(task_id) -> TaskUpdate:
 
 
 # PROD PORTABLE: pure mutator — no IO, no error handling.
-def poll_task(task):
+async def poll_task(task):
     """Apply the latest update to a task. Return the newly discovered dependency, if any."""
     if is_terminate_status(task.status):
         return None
 
-    update = fetch_task_update(task.id)
+    update = await fetch_task_update(task.id)
     task.status = update.status
     task.dependency_id = update.dependency_id
     task.dependency_name = update.dependency_name
@@ -187,29 +187,6 @@ def poll_task(task):
         return Task(id=update.dependency_id, name=update.dependency_name)
 
     return None
-
-
-# PROD PORTABLE.
-def poll_active_tasks(releases: list, tasks: dict) -> None:
-    """Poll all active tasks and newly discovered dependency tasks.
-
-    `tasks` is the single source of truth — it doubles as the known-task set and
-    the status store. New dependency tasks discovered during polling are appended
-    to the worklist within the same cycle.
-    """
-    for release in releases:
-        tasks.setdefault(
-            release.root_task_id,
-            Task(id=release.root_task_id, name=release.root_task_name),
-        )
-
-    worklist = list(tasks.values())
-    while worklist:
-        task = worklist.pop()
-        new_dep = poll_task(task)
-        if new_dep and new_dep.id not in tasks:
-            tasks[new_dep.id] = new_dep
-            worklist.append(new_dep)
 
 
 # PROD PORTABLE: can be reused directly.
@@ -261,14 +238,6 @@ class LiveWriter:
 
         sys.stdout.flush()
         self._previous_line_count = len(lines)
-
-
-# PROD PORTABLE: can be reused directly.
-def all_tasks_terminated(tasks: dict) -> bool:
-    """Return True when every monitored task has reached a terminate status."""
-    if not tasks:
-        return False
-    return all(is_terminate_status(task.status) for task in tasks.values())
 
 
 # PROD PORTABLE with one prod change: replace release_info with the real
