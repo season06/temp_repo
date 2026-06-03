@@ -165,7 +165,26 @@ def render_monitoring(releases, task_cache):
     Returns:
         str: Multi-line terminal output.
     """
-    lines = ["===== Monitoring ====="]
+    def append_dependency_lines(parent_task_id, indent, seen_task_ids):
+        task_info = task_cache.get(parent_task_id, {})
+        dependency_task_id = task_info.get("dependency_task_id")
+        dependency_task_name = task_info.get("dependency_task_name")
+        if not dependency_task_id or not dependency_task_name:
+            return
+
+        dependency_status = task_cache.get(dependency_task_id, {}).get("status", "Waiting")
+        lines.append(f"{indent}|_{dependency_task_name} : {dependency_status}")
+
+        if dependency_task_id in seen_task_ids:
+            return
+
+        append_dependency_lines(
+            dependency_task_id,
+            f"{indent}  ",
+            seen_task_ids | {dependency_task_id},
+        )
+
+    lines = []
 
     for _, release_name, task_id, task_name in releases:
         task_info = task_cache.get(task_id, {})
@@ -173,12 +192,8 @@ def render_monitoring(releases, task_cache):
 
         lines.append(f"{release_name} - {task_name} : {status}")
 
-        dependency_task_id = task_info.get("dependency_task_id")
-        dependency_task_name = task_info.get("dependency_task_name")
-        if dependency_task_id and dependency_task_name:
-            dependency_status = task_cache.get(dependency_task_id, {}).get("status", "Waiting")
-            indent = " " * (len(release_name) + 3)
-            lines.append(f"{indent}|_{dependency_task_name} : {dependency_status}")
+        indent = " " * (len(release_name) + 3)
+        append_dependency_lines(task_id, indent, {task_id})
 
     return "\n".join(lines)
 

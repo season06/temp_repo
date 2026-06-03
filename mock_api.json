@@ -21,6 +21,11 @@
     },
     "102": {
       "status": "InProgress",
+      "dependency_task_id": 103,
+      "dependency_task_name": "task-C"
+    },
+    "103": {
+      "status": "NotStarted",
       "dependency_task_id": null,
       "dependency_task_name": null
     },
