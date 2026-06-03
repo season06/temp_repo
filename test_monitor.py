@@ -238,5 +238,38 @@ class PollTaskAsyncTests(IsolatedAsyncioTestCase):
         self.assertIsNone(result)
 
 
+class PollChainTests(IsolatedAsyncioTestCase):
+    def _runner(self):
+        release = monitor.Release(
+            id=1, name="release-1",
+            available_tasks=[
+                monitor.ReleaseTaskDef(id=101, name="task-a"),
+                monitor.ReleaseTaskDef(id=102, name="task-b"),
+                monitor.ReleaseTaskDef(id=201, name="task-c"),
+            ],
+        )
+        return monitor.ReleaseRunner.from_input("release-1", ["task-a", "task-c"], [release])
+
+    async def test_poll_chain_discovers_dependency(self):
+        runner = self._runner()
+        tasks = {101: monitor.Task(id=101, name="task-a")}
+
+        responses = {
+            101: monitor.TaskUpdate(status="InProgress", dependency_id=102, dependency_name="task-b"),
+            102: monitor.TaskUpdate(status="NotStarted"),
+        }
+
+        async def fake_fetch(task_id):
+            return responses[task_id]
+
+        with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
+            await runner._poll_chain(101, tasks)
+
+        self.assertIn(102, tasks)
+        self.assertEqual(tasks[102].name, "task-b")
+        self.assertEqual(tasks[101].status, "InProgress")
+        self.assertEqual(tasks[102].status, "NotStarted")
+
+
 if __name__ == "__main__":
     unittest.main()

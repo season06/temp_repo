@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 TERMINATE_STATUSES = {"successed", "failed", "canceled"}
 MOCK_API_FILE = "mock_api.json"
+POLL_INTERVAL_SECONDS = 2
 
 
 @dataclass
@@ -72,6 +73,31 @@ class ReleaseRunner:
             if td.name == name:
                 return td.id
         raise ValueError(f"task {name!r} not in release {self.release.name!r}")
+
+    async def _poll_chain(self, root_id: int, tasks: dict) -> None:
+        """Poll root + all known cascade tasks once. Newly discovered deps join `tasks`."""
+        worklist = [tasks[root_id]]
+        seen = set()
+        while worklist:
+            task = worklist.pop()
+            if task.id in seen:
+                continue
+            seen.add(task.id)
+
+            new_dep = await poll_task(task)
+            if new_dep and new_dep.id not in tasks:
+                tasks[new_dep.id] = new_dep
+                worklist.append(new_dep)
+            elif task.dependency_id and task.dependency_id in tasks:
+                worklist.append(tasks[task.dependency_id])
+
+    async def _wait_chain_terminal(self, root_id: int, tasks: dict) -> None:
+        """Poll-and-wait until root's chain is fully terminal."""
+        while True:
+            await self._poll_chain(root_id, tasks)
+            if chain_terminal(root_id, tasks):
+                return
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 # MOCK ONLY: read this file on every polling cycle. Edit mock_api.json while the
