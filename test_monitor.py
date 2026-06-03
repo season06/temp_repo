@@ -1,4 +1,9 @@
+import asyncio
+import json
+import os
+import tempfile
 import unittest
+from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
 import monitor
@@ -214,6 +219,65 @@ class ChainTerminalTests(unittest.TestCase):
     def test_error_status_is_not_terminal(self):
         tasks = {101: monitor.Task(id=101, name="task-a", status="Error")}
         self.assertFalse(monitor.chain_terminal(101, tasks))
+
+
+class AsyncApiTests(IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._original_mock_file = monitor.MOCK_API_FILE
+        monitor.MOCK_API_FILE = os.path.join(self._tmpdir, "mock.json")
+        with open(monitor.MOCK_API_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "releases": [{
+                    "release_id": 1,
+                    "release_name": "release-1",
+                    "available_tasks": [
+                        {"task_id": 101, "task_name": "task-a"},
+                        {"task_id": 102, "task_name": "task-b"},
+                    ],
+                }],
+                "tasks": {
+                    "101": {"status": "NotStarted", "dependency_task_id": 102, "dependency_task_name": "task-b"},
+                    "102": {"status": "NotStarted", "dependency_task_id": None, "dependency_task_name": None},
+                },
+            }, f)
+
+    async def asyncTearDown(self):
+        monitor.MOCK_API_FILE = self._original_mock_file
+        import shutil
+        shutil.rmtree(self._tmpdir)
+
+    async def test_get_release_metadata_returns_releases(self):
+        releases = await monitor.get_release_metadata()
+        self.assertEqual(len(releases), 1)
+        self.assertEqual(releases[0].name, "release-1")
+        self.assertEqual(releases[0].available_tasks[0].name, "task-a")
+        self.assertEqual(releases[0].available_tasks[0].id, 101)
+
+    async def test_get_release_task_info_returns_dict(self):
+        info = await monitor.get_release_task_info(101)
+        self.assertEqual(info["status"], "NotStarted")
+        self.assertEqual(info["dependency_task_id"], 102)
+
+    async def test_get_release_task_info_raises_on_unknown(self):
+        with self.assertRaises(KeyError):
+            await monitor.get_release_task_info(999)
+
+    async def test_trigger_task_sets_status_to_inprogress(self):
+        await monitor.trigger_task(101)
+        info = await monitor.get_release_task_info(101)
+        self.assertEqual(info["status"], "InProgress")
+
+    async def test_trigger_task_is_idempotent(self):
+        await monitor.trigger_task(101)
+        await monitor.trigger_task(101)
+        info = await monitor.get_release_task_info(101)
+        self.assertEqual(info["status"], "InProgress")
+
+    async def test_fetch_task_update_returns_error_on_failure(self):
+        update = await monitor.fetch_task_update(999)
+        self.assertEqual(update.status, "Error")
+        self.assertIsNone(update.dependency_id)
 
 
 if __name__ == "__main__":

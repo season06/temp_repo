@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 import time
@@ -75,25 +76,35 @@ class ReleaseRunner:
 
 # MOCK ONLY: read this file on every polling cycle. Edit mock_api.json while the
 # monitor is running to simulate API status updates.
-def read_mock_api_file() -> dict:
+async def read_mock_api_file() -> dict:
     """Read the mock API JSON file used to simulate live status updates."""
-    with open(MOCK_API_FILE, "r", encoding="utf-8") as file:
-        return json.load(file)
+    def _read():
+        with open(MOCK_API_FILE, "r", encoding="utf-8") as file:
+            return json.load(file)
+    return await asyncio.to_thread(_read)
 
 
-# MOCK ONLY: test input source. In prod, replace this with the release/task list
-# returned by your Azure release pipeline query.
-def get_release_info() -> list:
-    """Return the initial release/root-task list."""
-    data = read_mock_api_file()
+async def _write_mock_api_file(data: dict) -> None:
+    """Write back the mock API JSON file. Mock-only — prod has no analog."""
+    def _write():
+        with open(MOCK_API_FILE, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=2)
+    await asyncio.to_thread(_write)
+
+
+async def get_release_metadata() -> list:
+    """Return all releases with their available task definitions."""
+    data = await read_mock_api_file()
     return [
         Release(
-            id=release["release_id"],
-            name=release["release_name"],
-            root_task_id=release["task_id"],
-            root_task_name=release["task_name"],
+            id=r["release_id"],
+            name=r["release_name"],
+            available_tasks=[
+                ReleaseTaskDef(id=t["task_id"], name=t["task_name"])
+                for t in r["available_tasks"]
+            ],
         )
-        for release in data["releases"]
+        for r in data["releases"]
     ]
 
 
@@ -104,19 +115,28 @@ def get_release_info() -> list:
 #     "dependency_task_id": ...,
 #     "dependency_task_name": "...",
 # }
-def get_release_task_info(task_id) -> dict:
+async def get_release_task_info(task_id) -> dict:
     """Return the latest task status from the mock file."""
-    data = read_mock_api_file()
+    data = await read_mock_api_file()
     task_data = data["tasks"].get(str(task_id))
-
     if task_data is None:
         raise KeyError(f"task not found: {task_id}")
-
     return {
         "status": task_data.get("status", "Unknown"),
         "dependency_task_id": task_data.get("dependency_task_id"),
         "dependency_task_name": task_data.get("dependency_task_name"),
     }
+
+
+async def trigger_task(task_id) -> None:
+    """MOCK ONLY: force the task's status to InProgress. Idempotent.
+    In prod, this becomes an HTTP POST to the Azure release pipeline."""
+    data = await read_mock_api_file()
+    task_data = data["tasks"].get(str(task_id))
+    if task_data is None:
+        raise KeyError(f"task not found: {task_id}")
+    task_data["status"] = "InProgress"
+    await _write_mock_api_file(data)
 
 
 # PROD PORTABLE: can be reused directly.
@@ -139,10 +159,10 @@ def chain_terminal(root_id: int, tasks: dict) -> bool:
 
 
 # PROD PORTABLE: error handling lives here so callers can stay pure.
-def fetch_task_update(task_id) -> TaskUpdate:
+async def fetch_task_update(task_id) -> TaskUpdate:
     """Fetch latest task state via the API. Return an Error update if the call fails."""
     try:
-        info = get_release_task_info(task_id)
+        info = await get_release_task_info(task_id)
     except Exception:
         return TaskUpdate(status="Error")
     return TaskUpdate(
