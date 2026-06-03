@@ -179,5 +179,42 @@ class ReleaseRunnerConstructionTests(unittest.TestCase):
         self.assertEqual(runner._resolve_name("task-c"), 201)
 
 
+class ChainTerminalTests(unittest.TestCase):
+    def test_all_terminal_returns_true(self):
+        tasks = {
+            101: monitor.Task(id=101, name="task-a", status="Successed", dependency_id=102, dependency_name="task-b"),
+            102: monitor.Task(id=102, name="task-b", status="Failed"),
+        }
+        self.assertTrue(monitor.chain_terminal(101, tasks))
+
+    def test_partial_terminal_returns_false(self):
+        tasks = {
+            101: monitor.Task(id=101, name="task-a", status="Successed", dependency_id=102, dependency_name="task-b"),
+            102: monitor.Task(id=102, name="task-b", status="InProgress"),
+        }
+        self.assertFalse(monitor.chain_terminal(101, tasks))
+
+    def test_root_not_terminal_returns_false(self):
+        tasks = {101: monitor.Task(id=101, name="task-a", status="InProgress")}
+        self.assertFalse(monitor.chain_terminal(101, tasks))
+
+    def test_handles_cycle(self):
+        tasks = {
+            101: monitor.Task(id=101, name="task-a", status="Successed", dependency_id=102, dependency_name="task-b"),
+            102: monitor.Task(id=102, name="task-b", status="Successed", dependency_id=101, dependency_name="task-a"),
+        }
+        self.assertTrue(monitor.chain_terminal(101, tasks))
+
+    def test_handles_broken_chain_when_dep_missing(self):
+        tasks = {
+            101: monitor.Task(id=101, name="task-a", status="Successed", dependency_id=999, dependency_name="ghost"),
+        }
+        self.assertFalse(monitor.chain_terminal(101, tasks))
+
+    def test_error_status_is_not_terminal(self):
+        tasks = {101: monitor.Task(id=101, name="task-a", status="Error")}
+        self.assertFalse(monitor.chain_terminal(101, tasks))
+
+
 if __name__ == "__main__":
     unittest.main()

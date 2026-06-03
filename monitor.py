@@ -125,6 +125,19 @@ def is_terminate_status(status):
     return status.lower() in TERMINATE_STATUSES
 
 
+def chain_terminal(root_id: int, tasks: dict) -> bool:
+    """Return True when root + its entire dependency chain are all in a terminal status."""
+    seen = set()
+    current_id = root_id
+    while current_id is not None and current_id not in seen:
+        seen.add(current_id)
+        task = tasks.get(current_id)
+        if task is None or not is_terminate_status(task.status):
+            return False
+        current_id = task.dependency_id
+    return True
+
+
 # PROD PORTABLE: error handling lives here so callers can stay pure.
 def fetch_task_update(task_id) -> TaskUpdate:
     """Fetch latest task state via the API. Return an Error update if the call fails."""
