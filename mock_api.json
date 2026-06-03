@@ -10,7 +10,7 @@
       "release_id": 2,
       "release_name": "test_release_2",
       "task_id": 201,
-      "task_name": "task-C"
+      "task_name": "task-1"
     }
   ],
   "tasks": {
@@ -30,6 +30,11 @@
       "dependency_task_name": null
     },
     "201": {
+      "status": "NotStarted",
+      "dependency_task_id": 202,
+      "dependency_task_name": "hi"
+    },
+    "202": {
       "status": "NotStarted",
       "dependency_task_id": null,
       "dependency_task_name": null

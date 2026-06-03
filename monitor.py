@@ -1,15 +1,43 @@
 import json
 import sys
 import time
+from dataclasses import dataclass
 
 
 TERMINATE_STATUSES = {"successed", "failed", "canceled"}
 MOCK_API_FILE = "mock_api.json"
 
 
+@dataclass
+class Task:
+    """One monitored task with its latest known status and direct dependency."""
+    id: int
+    name: str
+    status: str = "Waiting"
+    dependency_id: int | None = None
+    dependency_name: str | None = None
+
+
+@dataclass(frozen=True)
+class Release:
+    """A release entry pointing at its root task."""
+    id: int
+    name: str
+    root_task_id: int
+    root_task_name: str
+
+
+@dataclass(frozen=True)
+class TaskUpdate:
+    """A typed snapshot returned from the API. Decouples IO shape from Task fields."""
+    status: str
+    dependency_id: int | None = None
+    dependency_name: str | None = None
+
+
 # MOCK ONLY: read this file on every polling cycle. Edit mock_api.json while the
 # monitor is running to simulate API status updates.
-def read_mock_api_file():
+def read_mock_api_file() -> dict:
     """Read the mock API JSON file used to simulate live status updates."""
     with open(MOCK_API_FILE, "r", encoding="utf-8") as file:
         return json.load(file)
@@ -17,20 +45,15 @@ def read_mock_api_file():
 
 # MOCK ONLY: test input source. In prod, replace this with the release/task list
 # returned by your Azure release pipeline query.
-def get_release_info():
-    """Return initial release tasks from the mock file.
-
-    Returns:
-        list[tuple]: Items in (release_id, release_name, task_id, task_name)
-        format.
-    """
+def get_release_info() -> list:
+    """Return the initial release/root-task list."""
     data = read_mock_api_file()
     return [
-        (
-            release["release_id"],
-            release["release_name"],
-            release["task_id"],
-            release["task_name"],
+        Release(
+            id=release["release_id"],
+            name=release["release_name"],
+            root_task_id=release["task_id"],
+            root_task_name=release["task_name"],
         )
         for release in data["releases"]
     ]
@@ -43,19 +66,8 @@ def get_release_info():
 #     "dependency_task_id": ...,
 #     "dependency_task_name": "...",
 # }
-def get_release_task_info(task_id):
-    """Return the latest task status from the mock file.
-
-    Args:
-        task_id: Task ID to query.
-
-    Returns:
-        dict: A task info mapping with status, dependency_task_id, and
-        dependency_task_name.
-
-    Raises:
-        KeyError: If the task does not exist in the mock file.
-    """
+def get_release_task_info(task_id) -> dict:
+    """Return the latest task status from the mock file."""
     data = read_mock_api_file()
     task_data = data["tasks"].get(str(task_id))
 
@@ -75,188 +87,133 @@ def is_terminate_status(status):
     return status.lower() in TERMINATE_STATUSES
 
 
-# PROD PORTABLE: can be reused if prod get_release_task_info() keeps the same
-# return shape.
-def poll_task(task_id, task_name, task_cache):
-    """Poll one task and update the local task cache.
-
-    A task already in a terminate status is skipped. If the task has a
-    dependency task, the dependency is returned so the caller can add it to the
-    monitored task set.
-
-    Args:
-        task_id: Task ID to poll.
-        task_name: Human-readable task name.
-        task_cache: Mutable cache storing the latest known task status.
-
-    Returns:
-        list[tuple]: Dependency tasks in (task_id, task_name) format.
-    """
-    if is_terminate_status(task_cache.get(task_id, {}).get("status", "")):
-        return []
-
+# PROD PORTABLE: error handling lives here so callers can stay pure.
+def fetch_task_update(task_id) -> TaskUpdate:
+    """Fetch latest task state via the API. Return an Error update if the call fails."""
     try:
-        task_info = get_release_task_info(task_id)
+        info = get_release_task_info(task_id)
     except Exception:
-        task_cache[task_id] = {
-            "task_name": task_name,
-            "status": "Error",
-            "dependency_task_id": None,
-            "dependency_task_name": None,
-        }
-        return []
-
-    task_cache[task_id] = {
-        "task_name": task_name,
-        "status": task_info.get("status", "Unknown"),
-        "dependency_task_id": task_info.get("dependency_task_id"),
-        "dependency_task_name": task_info.get("dependency_task_name"),
-    }
-
-    dependency_task_id = task_info.get("dependency_task_id")
-    dependency_task_name = task_info.get("dependency_task_name")
-    if dependency_task_id and dependency_task_name:
-        return [(dependency_task_id, dependency_task_name)]
-
-    return []
+        return TaskUpdate(status="Error")
+    return TaskUpdate(
+        status=info.get("status", "Unknown"),
+        dependency_id=info.get("dependency_task_id"),
+        dependency_name=info.get("dependency_task_name"),
+    )
 
 
-# PROD PORTABLE: can be reused if releases keep the same tuple shape:
-# (rls_id, rls_name, task_id, task_name).
-def poll_active_tasks(releases, task_cache, monitored_tasks):
+# PROD PORTABLE: pure mutator — no IO, no error handling.
+def poll_task(task):
+    """Apply the latest update to a task. Return the newly discovered dependency, if any."""
+    if is_terminate_status(task.status):
+        return None
+
+    update = fetch_task_update(task.id)
+    task.status = update.status
+    task.dependency_id = update.dependency_id
+    task.dependency_name = update.dependency_name
+
+    if update.dependency_id and update.dependency_name:
+        return Task(id=update.dependency_id, name=update.dependency_name)
+
+    return None
+
+
+# PROD PORTABLE.
+def poll_active_tasks(releases: list, tasks: dict) -> None:
     """Poll all active tasks and newly discovered dependency tasks.
 
-    Initial release tasks are added to monitored_tasks first. Dependency tasks
-    found during polling are queried in the same polling cycle.
-
-    Args:
-        releases: Release task tuples in (release_id, release_name, task_id, task_name) format.
-        task_cache: Mutable cache storing latest task info by task ID.
-        monitored_tasks: Mutable mapping of task ID to task name.
+    `tasks` is the single source of truth — it doubles as the known-task set and
+    the status store. New dependency tasks discovered during polling are appended
+    to the worklist within the same cycle.
     """
-    for _, _, task_id, task_name in releases:
-        monitored_tasks.setdefault(task_id, task_name)
+    for release in releases:
+        tasks.setdefault(
+            release.root_task_id,
+            Task(id=release.root_task_id, name=release.root_task_name),
+        )
 
-    pending_tasks = list(monitored_tasks.items())
-    polled_tasks = set()
-
-    while pending_tasks:
-        task_id, task_name = pending_tasks.pop(0)
-        if task_id in polled_tasks:
-            continue
-
-        polled_tasks.add(task_id)
-        dependencies = poll_task(task_id, task_name, task_cache)
-        for dependency_task_id, dependency_task_name in dependencies:
-            if dependency_task_id not in monitored_tasks:
-                monitored_tasks[dependency_task_id] = dependency_task_name
-                pending_tasks.append((dependency_task_id, dependency_task_name))
+    worklist = list(tasks.values())
+    while worklist:
+        task = worklist.pop()
+        new_dep = poll_task(task)
+        if new_dep and new_dep.id not in tasks:
+            tasks[new_dep.id] = new_dep
+            worklist.append(new_dep)
 
 
 # PROD PORTABLE: can be reused directly.
-def render_monitoring(releases, task_cache):
-    """Render the current monitoring view as terminal text.
-
-    Args:
-        releases: Release task tuples in
-        (release_id, release_name, task_id, task_name) format.
-        task_cache: Latest known task info by task ID.
-
-    Returns:
-        str: Multi-line terminal output.
-    """
-    def append_dependency_lines(parent_task_id, indent, seen_task_ids):
-        task_info = task_cache.get(parent_task_id, {})
-        dependency_task_id = task_info.get("dependency_task_id")
-        dependency_task_name = task_info.get("dependency_task_name")
-        if not dependency_task_id or not dependency_task_name:
-            return
-
-        dependency_status = task_cache.get(dependency_task_id, {}).get("status", "Waiting")
-        lines.append(f"{indent}|_{dependency_task_name} : {dependency_status}")
-
-        if dependency_task_id in seen_task_ids:
-            return
-
-        append_dependency_lines(
-            dependency_task_id,
-            f"{indent}  ",
-            seen_task_ids | {dependency_task_id},
-        )
-
+def render_monitoring(releases: list, tasks: dict) -> str:
+    """Render the current monitoring view as terminal text."""
     lines = []
 
-    for _, release_name, task_id, task_name in releases:
-        task_info = task_cache.get(task_id, {})
-        status = task_info.get("status", "Waiting")
+    for release in releases:
+        root = tasks.get(release.root_task_id)
+        root_status = root.status if root else "Waiting"
+        lines.append(f"{release.name} - {release.root_task_name} : {root_status}")
 
-        lines.append(f"{release_name} - {task_name} : {status}")
+        indent = " " * (len(release.name) + 3)
+        seen = {release.root_task_id}
+        current = root
 
-        indent = " " * (len(release_name) + 3)
-        append_dependency_lines(task_id, indent, {task_id})
+        while current and current.dependency_id and current.dependency_name:
+            dep_id = current.dependency_id
+            dep = tasks.get(dep_id)
+            dep_status = dep.status if dep else "Waiting"
+            lines.append(f"{indent}|_{current.dependency_name} : {dep_status}")
+
+            if dep_id in seen:
+                break
+            seen.add(dep_id)
+            indent += "  "
+            current = dep
 
     return "\n".join(lines)
 
 
-# PROD PORTABLE: can be reused directly for realtime terminal updates without
-# cls/clear.
-def write_live_update(output, previous_line_count):
-    """Write a realtime terminal update without clearing the full terminal.
+# PROD PORTABLE: encapsulates the cursor-line bookkeeping so callers don't.
+class LiveWriter:
+    """Repaints a multi-line block in place using ANSI cursor moves."""
 
-    The function moves the cursor back to the beginning of the previous output
-    block, clears each old line, and writes the new block.
+    def __init__(self):
+        self._previous_line_count = 0
 
-    Args:
-        output: New multi-line output to display.
-        previous_line_count: Number of lines written by the previous update.
+    def write(self, output) -> None:
+        lines = output.splitlines()
+        line_count = max(len(lines), self._previous_line_count)
 
-    Returns:
-        int: Number of lines written by this update.
-    """
-    lines = output.splitlines()
-    line_count = max(len(lines), previous_line_count)
+        if self._previous_line_count:
+            sys.stdout.write(f"\x1b[{self._previous_line_count}F")
 
-    if previous_line_count:
-        sys.stdout.write(f"\x1b[{previous_line_count}F")
+        for index in range(line_count):
+            line = lines[index] if index < len(lines) else ""
+            sys.stdout.write(f"\x1b[2K{line}\n")
 
-    for index in range(line_count):
-        line = lines[index] if index < len(lines) else ""
-        sys.stdout.write(f"\x1b[2K{line}\n")
-
-    sys.stdout.flush()
-    return len(lines)
+        sys.stdout.flush()
+        self._previous_line_count = len(lines)
 
 
 # PROD PORTABLE: can be reused directly.
-def all_tasks_terminated(task_cache, monitored_tasks):
+def all_tasks_terminated(tasks: dict) -> bool:
     """Return True when every monitored task has reached a terminate status."""
-    if not monitored_tasks:
+    if not tasks:
         return False
-
-    for task_id in monitored_tasks:
-        status = task_cache.get(task_id, {}).get("status", "")
-        if not is_terminate_status(status):
-            return False
-
-    return True
+    return all(is_terminate_status(task.status) for task in tasks.values())
 
 
 # PROD PORTABLE with one prod change: replace release_info with the real
 # release/task list source before calling poll_active_tasks().
-def main():
+def main() -> None:
     """Run the monitoring loop until all monitored tasks terminate."""
-    task_cache = {}
-    monitored_tasks = {}
-    previous_line_count = 0
+    tasks: dict = {}
+    writer = LiveWriter()
     print("===Start===")
 
     while True:
-        release_info = get_release_info()
-        poll_active_tasks(release_info, task_cache, monitored_tasks)
-        output = render_monitoring(release_info, task_cache)
-        previous_line_count = write_live_update(output, previous_line_count)
+        releases = get_release_info()
+        poll_active_tasks(releases, tasks)
+        writer.write(render_monitoring(releases, tasks))
 
-        if all_tasks_terminated(task_cache, monitored_tasks):
+        if all_tasks_terminated(tasks):
             break
 
         time.sleep(2)
