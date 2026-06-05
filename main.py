@@ -52,3 +52,9 @@ def create_release(pat, definition_id) -> int:
     url = f"{RELEASE_HOST}/releases?api-version={API_VERSION}"
     data = _send_request("POST", url, pat, {"definitionId": definition_id})
     return data["id"]
+
+
+def get_release(pat, release_id) -> dict:
+    """Get release detail including environments. Returns the release JSON."""
+    url = f"{RELEASE_HOST}/releases/{release_id}?api-version={API_VERSION}"
+    return _send_request("GET", url, pat)
