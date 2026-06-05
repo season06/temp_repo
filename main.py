@@ -58,3 +58,10 @@ def get_release(pat, release_id) -> dict:
     """Get release detail including environments. Returns the release JSON."""
     url = f"{RELEASE_HOST}/releases/{release_id}?api-version={API_VERSION}"
     return _send_request("GET", url, pat)
+
+
+def trigger_release_task(pat, release_id, environment_id) -> dict:
+    """Trigger a release task by setting its environment status to inProgress.
+    Returns the updated environment JSON."""
+    url = f"{RELEASE_HOST}/releases/{release_id}/environments/{environment_id}?api-version={API_VERSION}"
+    return _send_request("PATCH", url, pat, {"status": "inProgress"})

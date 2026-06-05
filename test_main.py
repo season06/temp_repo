@@ -66,6 +66,21 @@ class AzureRequestShapingTests(unittest.TestCase):
         self.assertIn("/releases/500", captured["url"])
         self.assertEqual(result, payload)
 
+    def test_trigger_release_task_patches_environment_to_inprogress(self):
+        captured = {}
+
+        def fake_send(method, url, pat, body=None):
+            captured.update(method=method, url=url, body=body)
+            return {"id": 7, "status": "inProgress"}
+
+        with patch.object(main, "_send_request", side_effect=fake_send):
+            result = main.trigger_release_task("PAT", 500, 7)
+
+        self.assertEqual(captured["method"], "PATCH")
+        self.assertIn("/releases/500/environments/7", captured["url"])
+        self.assertEqual(captured["body"], {"status": "inProgress"})
+        self.assertEqual(result["status"], "inProgress")
+
 
 if __name__ == "__main__":
     unittest.main()
