@@ -73,7 +73,7 @@ class ReleaseRunner:
                 return td.id
         raise ValueError(f"task {name!r} not in release {self.release.name!r}")
 
-    async def _poll_chain(self, root_id: int, tasks: dict) -> None:
+    async def _poll_chain(self, root_id: int, tasks: dict, api) -> None:
         """Poll root + all known cascade tasks once. Newly discovered deps join `tasks`."""
         worklist = [tasks[root_id]]
         seen = set()
@@ -83,22 +83,22 @@ class ReleaseRunner:
                 continue
             seen.add(task.id)
 
-            new_dep = await poll_task(task, self.release.id)
+            new_dep = await poll_task(task, self.release.id, api)
             if new_dep and new_dep.id not in tasks:
                 tasks[new_dep.id] = new_dep
                 worklist.append(new_dep)
             elif task.dependency_id and task.dependency_id in tasks:
                 worklist.append(tasks[task.dependency_id])
 
-    async def _wait_chain_terminal(self, root_id: int, tasks: dict) -> None:
+    async def _wait_chain_terminal(self, root_id: int, tasks: dict, api) -> None:
         """Poll-and-wait until root's chain is fully terminal."""
         while True:
-            await self._poll_chain(root_id, tasks)
+            await self._poll_chain(root_id, tasks, api)
             if chain_terminal(root_id, tasks):
                 return
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
-    async def run(self, tasks: dict) -> None:
+    async def run(self, tasks: dict, api) -> None:
         """Walk the trigger queue. Trigger each task and wait for its chain to terminate
         before moving on. Trigger failures mark the task Error and advance."""
         for name in self.trigger_queue:
@@ -108,13 +108,13 @@ class ReleaseRunner:
             tasks[tid] = Task(id=tid, name=name)
 
             try:
-                await trigger_task(tid)
+                await api.trigger_task(self.release.id, tid)
             except Exception:
                 tasks[tid].status = "Error"
                 self.active_root_id = None
                 continue
 
-            await self._wait_chain_terminal(tid, tasks)
+            await self._wait_chain_terminal(tid, tasks, api)
             self.active_root_id = None
 
         self._done = True
@@ -186,6 +186,16 @@ async def trigger_task(task_id) -> None:
     await _write_mock_api_file(data)
 
 
+class MockApi:
+    """Default API seam backed by mock_api.json. Swap with AzureApi (main.py) in prod."""
+
+    async def trigger_task(self, release_id, task_id) -> None:
+        await trigger_task(task_id)
+
+    async def get_task_info(self, release_id, task_id, task_name) -> dict:
+        return await get_release_task_info(release_id, task_id, task_name)
+
+
 # PROD PORTABLE: can be reused directly.
 def is_terminate_status(status):
     """Return True when a task status means monitoring can stop for that task."""
@@ -205,11 +215,10 @@ def chain_terminal(root_id: int, tasks: dict) -> bool:
     return True
 
 
-# PROD PORTABLE: error handling lives here so callers can stay pure.
-async def fetch_task_update(release_id, task_id, task_name) -> TaskUpdate:
-    """Fetch latest task state via the API. Return an Error update if the call fails."""
+async def fetch_task_update(api, release_id, task_id, task_name) -> TaskUpdate:
+    """Fetch latest task state via the API seam. Return an Error update if the call fails."""
     try:
-        info = await get_release_task_info(release_id, task_id, task_name)
+        info = await api.get_task_info(release_id, task_id, task_name)
     except Exception:
         return TaskUpdate(status="Error")
     return TaskUpdate(
@@ -219,13 +228,12 @@ async def fetch_task_update(release_id, task_id, task_name) -> TaskUpdate:
     )
 
 
-# PROD PORTABLE: pure mutator — no IO, no error handling.
-async def poll_task(task, release_id):
+async def poll_task(task, release_id, api):
     """Apply the latest update to a task. Return the newly discovered dependency, if any."""
     if is_terminate_status(task.status):
         return None
 
-    update = await fetch_task_update(release_id, task.id, task.name)
+    update = await fetch_task_update(api, release_id, task.id, task.name)
     task.status = update.status
     task.dependency_id = update.dependency_id
     task.dependency_name = update.dependency_name
@@ -296,7 +304,14 @@ async def render_loop(runners: list, tasks: dict, writer: LiveWriter) -> None:
     writer.write(render_monitoring(runners, tasks))  # final paint
 
 
-# PROD PORTABLE with one prod change: replace be_trigger_release with real input source.
+async def run_orchestration(runners: list, tasks: dict, api, writer) -> None:
+    """Run every release's runner concurrently with the render heartbeat."""
+    await asyncio.gather(
+        *(r.run(tasks, api) for r in runners),
+        render_loop(runners, tasks, writer),
+    )
+
+
 async def monitor() -> None:
     """Run the trigger-and-monitor loop until every release's queue is drained."""
     be_trigger_release: list = [
@@ -311,13 +326,11 @@ async def monitor() -> None:
 
     tasks: dict = {}
     writer = LiveWriter()
+    api = MockApi()  # swap for AzureApi() (main.py) to run against real Azure
     print("===Start===")
 
     try:
-        await asyncio.gather(
-            *(r.run(tasks) for r in runners),
-            render_loop(runners, tasks, writer),
-        )
+        await run_orchestration(runners, tasks, api, writer)
     except KeyboardInterrupt:
         print("\n===Cancelled===")
 

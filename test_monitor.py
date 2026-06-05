@@ -9,6 +9,28 @@ from unittest.mock import patch
 import monitor
 
 
+class FakeApi:
+    """Test double for the monitor API seam.
+
+    responses: dict mapping task_id -> response dict, or task_id -> callable(task_id)->dict.
+    trigger_errors: task ids whose trigger_task should raise.
+    """
+    def __init__(self, responses=None, trigger_errors=None):
+        self.responses = responses or {}
+        self.trigger_errors = set(trigger_errors or [])
+        self.trigger_order = []
+
+    async def trigger_task(self, release_id, task_id):
+        self.trigger_order.append(task_id)
+        if task_id in self.trigger_errors:
+            raise ConnectionError("simulated")
+
+    async def get_task_info(self, release_id, task_id, task_name):
+        if task_id not in self.responses:
+            raise KeyError(f"FakeApi has no response for task_id={task_id!r}")
+        r = self.responses[task_id]
+        return r(task_id) if callable(r) else r
+
 
 class DataModelTests(unittest.TestCase):
     def test_release_holds_available_tasks(self):
@@ -155,7 +177,7 @@ class AsyncApiTests(IsolatedAsyncioTestCase):
         self.assertEqual(info["status"], "InProgress")
 
     async def test_fetch_task_update_returns_error_on_failure(self):
-        update = await monitor.fetch_task_update(1, 999, "task-x")
+        update = await monitor.fetch_task_update(monitor.MockApi(), 1, 999, "task-x")
         self.assertEqual(update.status, "Error")
         self.assertIsNone(update.dependency_id)
 
@@ -163,12 +185,11 @@ class AsyncApiTests(IsolatedAsyncioTestCase):
 class PollTaskAsyncTests(IsolatedAsyncioTestCase):
     async def test_poll_task_updates_in_place(self):
         task = monitor.Task(id=101, name="task-a")
+        api = FakeApi({101: {"status": "InProgress",
+                             "dependency_task_id": 102,
+                             "dependency_task_name": "task-b"}})
 
-        async def fake_fetch(release_id, task_id, task_name):
-            return monitor.TaskUpdate(status="InProgress", dependency_id=102, dependency_name="task-b")
-
-        with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            new_dep = await monitor.poll_task(task, 1)
+        new_dep = await monitor.poll_task(task, 1, api)
 
         self.assertEqual(task.status, "InProgress")
         self.assertEqual(task.dependency_id, 102)
@@ -179,22 +200,21 @@ class PollTaskAsyncTests(IsolatedAsyncioTestCase):
     async def test_poll_task_skips_when_terminal(self):
         task = monitor.Task(id=101, name="task-a", status="Successed")
 
-        async def fake_fetch(release_id, task_id, task_name):
+        def boom(_):
             raise AssertionError("should not be called")
 
-        with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            result = await monitor.poll_task(task, 1)
+        api = FakeApi({101: boom})
+        result = await monitor.poll_task(task, 1, api)
 
         self.assertIsNone(result)
 
     async def test_poll_task_returns_none_when_no_dep(self):
         task = monitor.Task(id=102, name="task-b")
+        api = FakeApi({102: {"status": "InProgress",
+                             "dependency_task_id": None,
+                             "dependency_task_name": None}})
 
-        async def fake_fetch(release_id, task_id, task_name):
-            return monitor.TaskUpdate(status="InProgress")
-
-        with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            result = await monitor.poll_task(task, 1)
+        result = await monitor.poll_task(task, 1, api)
 
         self.assertIsNone(result)
 
@@ -214,17 +234,12 @@ class PollChainTests(IsolatedAsyncioTestCase):
     async def test_poll_chain_discovers_dependency(self):
         runner = self._runner()
         tasks = {101: monitor.Task(id=101, name="task-a")}
+        api = FakeApi({
+            101: {"status": "InProgress", "dependency_task_id": 102, "dependency_task_name": "task-b"},
+            102: {"status": "NotStarted", "dependency_task_id": None, "dependency_task_name": None},
+        })
 
-        responses = {
-            101: monitor.TaskUpdate(status="InProgress", dependency_id=102, dependency_name="task-b"),
-            102: monitor.TaskUpdate(status="NotStarted"),
-        }
-
-        async def fake_fetch(release_id, task_id, task_name):
-            return responses[task_id]
-
-        with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            await runner._poll_chain(101, tasks)
+        await runner._poll_chain(101, tasks, api)
 
         self.assertIn(102, tasks)
         self.assertEqual(tasks[102].name, "task-b")
@@ -249,26 +264,15 @@ class ReleaseRunnerRunTests(IsolatedAsyncioTestCase):
             "release-1", ["task-a", "task-c"], [self._release()],
         )
         tasks = {}
+        api = FakeApi({
+            101: {"status": "Successed", "dependency_task_id": 102, "dependency_task_name": "task-b"},
+            102: {"status": "Successed", "dependency_task_id": None, "dependency_task_name": None},
+            201: {"status": "Successed", "dependency_task_id": None, "dependency_task_name": None},
+        })
 
-        trigger_order = []
+        await runner.run(tasks, api)
 
-        async def fake_trigger(tid):
-            trigger_order.append(tid)
-
-        status_table = {
-            101: monitor.TaskUpdate(status="Successed", dependency_id=102, dependency_name="task-b"),
-            102: monitor.TaskUpdate(status="Successed"),
-            201: monitor.TaskUpdate(status="Successed"),
-        }
-
-        async def fake_fetch(release_id, task_id, task_name):
-            return status_table[task_id]
-
-        with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
-             patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            await runner.run(tasks)
-
-        self.assertEqual(trigger_order, [101, 201])
+        self.assertEqual(api.trigger_order, [101, 201])
         self.assertTrue(runner.is_done())
         self.assertEqual(runner.triggered, [101, 201])
         self.assertIsNone(runner.active_root_id)
@@ -279,81 +283,73 @@ class ReleaseRunnerRunTests(IsolatedAsyncioTestCase):
             "release-1", ["task-a", "task-c"], [self._release()],
         )
         tasks = {}
-
-        trigger_order = []
         poll_count = {101: 0, 102: 0, 201: 0}
 
-        async def fake_trigger(tid):
-            trigger_order.append(tid)
-
-        async def fake_fetch(release_id, task_id, task_name):
+        def responder(task_id):
             poll_count[task_id] += 1
             if task_id == 101:
-                return monitor.TaskUpdate(status="Successed", dependency_id=102, dependency_name="task-b")
+                return {"status": "Successed", "dependency_task_id": 102, "dependency_task_name": "task-b"}
             if task_id == 102:
-                if poll_count[102] < 3:
-                    return monitor.TaskUpdate(status="InProgress")
-                return monitor.TaskUpdate(status="Successed")
-            if task_id == 201:
-                return monitor.TaskUpdate(status="Successed")
+                return {"status": "InProgress"} if poll_count[102] < 3 else {"status": "Successed"}
+            return {"status": "Successed"}
+
+        api = FakeApi({101: responder, 102: responder, 201: responder})
+
+        # Snapshot how many times task-b (102) was polled at each trigger, so we can
+        # prove task-c (201) is not triggered until task-b reached terminal (>=3 polls).
+        poll_at_trigger = {}
+        base_trigger = api.trigger_task
+
+        async def recording_trigger(release_id, task_id):
+            poll_at_trigger[task_id] = poll_count[102]
+            await base_trigger(release_id, task_id)
+
+        api.trigger_task = recording_trigger
 
         async def no_sleep(_):
             return
 
-        with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
-             patch.object(monitor, "fetch_task_update", side_effect=fake_fetch), \
-             patch.object(monitor.asyncio, "sleep", side_effect=no_sleep):
-            await runner.run(tasks)
+        with patch.object(monitor.asyncio, "sleep", side_effect=no_sleep):
+            await runner.run(tasks, api)
 
-        self.assertEqual(trigger_order, [101, 201])
+        self.assertEqual(api.trigger_order, [101, 201])
         self.assertGreaterEqual(poll_count[102], 3)
+        self.assertGreaterEqual(poll_at_trigger[201], 3)
 
     async def test_run_continues_after_trigger_failure(self):
-        """trigger_task raises for 101 → task is marked Error, run() advances to 201."""
+        """trigger_task raises for 101 -> task is marked Error, run() advances to 201."""
         runner = monitor.ReleaseRunner.from_input(
             "release-1", ["task-a", "task-c"], [self._release()],
         )
         tasks = {}
-        trigger_order = []
+        api = FakeApi(
+            responses={201: {"status": "Successed"}},
+            trigger_errors={101},
+        )
 
-        async def fake_trigger(tid):
-            trigger_order.append(tid)
-            if tid == 101:
-                raise ConnectionError("simulated")
+        await runner.run(tasks, api)
 
-        async def fake_fetch(release_id, task_id, task_name):
-            return monitor.TaskUpdate(status="Successed")
-
-        with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
-             patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            await runner.run(tasks)
-
-        self.assertEqual(trigger_order, [101, 201])
+        self.assertEqual(api.trigger_order, [101, 201])
         self.assertEqual(tasks[101].status, "Error")
         self.assertTrue(runner.is_done())
 
     async def test_run_continues_after_task_failure(self):
-        """task-a returns Failed (terminal) → 201 still triggered."""
+        """task-a returns Failed (terminal) -> 201 still triggered."""
         runner = monitor.ReleaseRunner.from_input(
             "release-1", ["task-a", "task-c"], [self._release()],
         )
         tasks = {}
-        trigger_order = []
 
-        async def fake_trigger(tid):
-            trigger_order.append(tid)
+        def responder(task_id):
+            return {"status": "Failed"} if task_id == 101 else {"status": "Successed"}
 
-        async def fake_fetch(release_id, task_id, task_name):
-            if task_id == 101:
-                return monitor.TaskUpdate(status="Failed")
-            return monitor.TaskUpdate(status="Successed")
+        api = FakeApi({101: responder, 201: responder})
 
-        with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
-             patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            await runner.run(tasks)
+        await runner.run(tasks, api)
 
-        self.assertEqual(trigger_order, [101, 201])
+        self.assertEqual(api.trigger_order, [101, 201])
         self.assertEqual(tasks[101].status, "Failed")
+        self.assertTrue(runner.is_done())
 
 
 class RenderMonitoringTests(unittest.TestCase):
