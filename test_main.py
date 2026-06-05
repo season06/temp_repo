@@ -36,6 +36,21 @@ class AzureRequestShapingTests(unittest.TestCase):
         self.assertEqual(captured["pat"], "PAT")
         self.assertEqual(result, [("Deploy-App", 10)])
 
+    def test_create_release_posts_definition_id_and_returns_id(self):
+        captured = {}
+
+        def fake_send(method, url, pat, body=None):
+            captured.update(method=method, url=url, body=body)
+            return {"id": 500}
+
+        with patch.object(main, "_send_request", side_effect=fake_send):
+            release_id = main.create_release("PAT", 10)
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertIn("/releases", captured["url"])
+        self.assertEqual(captured["body"], {"definitionId": 10})
+        self.assertEqual(release_id, 500)
+
 
 if __name__ == "__main__":
     unittest.main()

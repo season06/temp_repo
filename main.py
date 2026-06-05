@@ -45,3 +45,10 @@ def find_release_definition(pat, definition_name) -> list:
         for d in data.get("value", [])
         if needle in d["name"].lower()
     ]
+
+
+def create_release(pat, definition_id) -> int:
+    """Create a new release from a definition. Returns the created release id."""
+    url = f"{RELEASE_HOST}/releases?api-version={API_VERSION}"
+    data = _send_request("POST", url, pat, {"definitionId": definition_id})
+    return data["id"]
