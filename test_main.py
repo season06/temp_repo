@@ -82,5 +82,25 @@ class AzureRequestShapingTests(unittest.TestCase):
         self.assertEqual(result["status"], "inProgress")
 
 
+class ParseSelectionTests(unittest.TestCase):
+    def test_parses_comma_separated_one_based_to_zero_based(self):
+        self.assertEqual(main.parse_selection("1,3", 3), [0, 2])
+
+    def test_strips_whitespace_and_ignores_empty_parts(self):
+        self.assertEqual(main.parse_selection(" 2 , ", 3), [1])
+
+    def test_rejects_empty(self):
+        with self.assertRaises(ValueError):
+            main.parse_selection("", 3)
+
+    def test_rejects_out_of_range(self):
+        with self.assertRaises(ValueError):
+            main.parse_selection("9", 3)
+
+    def test_rejects_non_numeric(self):
+        with self.assertRaises(ValueError):
+            main.parse_selection("x", 3)
+
+
 if __name__ == "__main__":
     unittest.main()

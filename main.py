@@ -65,3 +65,22 @@ def trigger_release_task(pat, release_id, environment_id) -> dict:
     Returns the updated environment JSON."""
     url = f"{RELEASE_HOST}/releases/{release_id}/environments/{environment_id}?api-version={API_VERSION}"
     return _send_request("PATCH", url, pat, {"status": "inProgress"})
+
+
+# ========= Interactive helpers =========
+
+def parse_selection(raw, count) -> list:
+    """Parse a '1,3' style 1-based selection into 0-based indices within [0, count).
+    Raises ValueError on empty or out-of-range input."""
+    indices = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        n = int(part)
+        if not 1 <= n <= count:
+            raise ValueError(f"selection out of range: {n}")
+        indices.append(n - 1)
+    if not indices:
+        raise ValueError("no selection")
+    return indices
