@@ -109,3 +109,66 @@ class AzureApi:
             "dependency_task_id": None,
             "dependency_task_name": None,
         }
+
+
+def _prompt_selection(prompt, count) -> list:
+    """Prompt until a valid selection is entered; returns 0-based indices."""
+    while True:
+        try:
+            return parse_selection(input(prompt), count)
+        except ValueError as exc:
+            print(f"Invalid selection: {exc}")
+
+
+# ========= Main flow =========
+
+def main():
+    parser = argparse.ArgumentParser(description="Azure release task orchestrator")
+    parser.add_argument("--pat", required=True, help="Azure DevOps Personal Access Token")
+    pat = parser.parse_args().pat
+
+    # Step 0-1: find release definitions (fuzzy) and pick.
+    search = input("Release definition to search: ").strip()
+    definitions = find_release_definition(pat, search)
+    if not definitions:
+        print("No matching release definitions.")
+        return
+    for i, (name, def_id) in enumerate(definitions, 1):
+        print(f"  {i}. {name} (id={def_id})")
+    selected = [definitions[i] for i in
+                _prompt_selection("Select definitions to create (e.g. 1,3): ", len(definitions))]
+
+    # Step 2-3: create each release, list environments, pick tasks.
+    releases = []
+    queue = []
+    for name, def_id in selected:
+        release_id = create_release(pat, def_id)
+        data = get_release(pat, release_id)
+        environments = data.get("environments", [])
+        release = Release(
+            id=release_id,
+            name=data.get("name", name),
+            available_tasks=[ReleaseTaskDef(id=e["id"], name=e["name"]) for e in environments],
+        )
+        print(f"\n{release.name} environments:")
+        for i, env in enumerate(environments, 1):
+            print(f"  {i}. {env['name']}")
+        task_names = [environments[i]["name"] for i in
+                      _prompt_selection("Select tasks to execute (e.g. 1,2): ", len(environments))]
+        releases.append(release)
+        queue.append((release.name, task_names))
+
+    # Step 4: execute & monitor via monitor.py.
+    runners = [ReleaseRunner.from_input(rn, tns, releases) for rn, tns in queue]
+    tasks = {}
+    writer = LiveWriter()
+    api = AzureApi(pat)
+    print("===Start===")
+    try:
+        asyncio.run(run_orchestration(runners, tasks, api, writer))
+    except KeyboardInterrupt:
+        print("\n===Cancelled===")
+
+
+if __name__ == "__main__":
+    main()

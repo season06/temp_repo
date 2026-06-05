@@ -137,5 +137,40 @@ class AzureApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [("PAT", 1, 5)])
 
 
+class MainFlowTests(unittest.TestCase):
+    def test_main_happy_path_builds_runners_and_runs(self):
+        inputs = iter(["app", "1", "1"])  # search text, definition pick, task pick
+        captured = {}
+
+        def fake_find(pat, text):
+            return [("Deploy-App", 10)]
+
+        def fake_create(pat, def_id):
+            return 500
+
+        def fake_get(pat, release_id):
+            return {"name": "Deploy-App",
+                    "environments": [{"id": 7, "name": "stage-1", "status": "notStarted"}]}
+
+        async def fake_orch(runners, tasks, api, writer):
+            captured["runners"] = runners
+            captured["api"] = api
+
+        argv = ["prog", "--pat", "SECRET"]
+        with patch.object(sys, "argv", argv), \
+             patch("builtins.input", side_effect=lambda *a: next(inputs)), \
+             patch.object(main, "find_release_definition", side_effect=fake_find), \
+             patch.object(main, "create_release", side_effect=fake_create), \
+             patch.object(main, "get_release", side_effect=fake_get), \
+             patch.object(main, "run_orchestration", side_effect=fake_orch):
+            main.main()
+
+        runners = captured["runners"]
+        self.assertEqual(len(runners), 1)
+        self.assertEqual(runners[0].release.name, "Deploy-App")
+        self.assertEqual(runners[0].trigger_queue, ["stage-1"])
+        self.assertIsInstance(captured["api"], main.AzureApi)
+
+
 if __name__ == "__main__":
     unittest.main()
