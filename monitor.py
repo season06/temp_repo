@@ -4,7 +4,9 @@ import sys
 from dataclasses import dataclass
 
 
-TERMINATE_STATUSES = {"successed", "failed", "canceled"}
+# Lowercased terminal statuses. Includes Azure's real spellings (succeeded,
+# partiallysucceeded, rejected) plus the mock's legacy "successed".
+TERMINATE_STATUSES = {"succeeded", "successed", "partiallysucceeded", "failed", "rejected", "canceled"}
 MOCK_API_FILE = "mock_api.json"
 POLL_INTERVAL_SECONDS = 2
 

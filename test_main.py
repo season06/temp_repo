@@ -172,5 +172,13 @@ class MainFlowTests(unittest.TestCase):
         self.assertIsInstance(captured["api"], main.AzureApi)
 
 
+class PromptSelectionTests(unittest.TestCase):
+    def test_reprompts_until_valid(self):
+        answers = iter(["bad", "0", "2"])  # non-numeric, out-of-range, then valid
+        with patch("builtins.input", side_effect=lambda *a: next(answers)):
+            result = main._prompt_selection("pick: ", 3)
+        self.assertEqual(result, [1])
+
+
 if __name__ == "__main__":
     unittest.main()
