@@ -32,3 +32,16 @@ def _send_request(method, url, pat, body=None) -> dict:
     headers = {"Authorization": _basic_auth(pat), "Content-Type": "application/json"}
     _ = (method, url, headers, body)
     raise NotImplementedError("wire real HTTP here (e.g. requests.request / urllib)")
+
+
+def find_release_definition(pat, definition_name) -> list:
+    """Find release definitions by name (case-insensitive substring fuzzy match).
+    Returns a list of (name, id)."""
+    url = f"{RELEASE_HOST}/definitions?searchText={definition_name}&api-version={API_VERSION}"
+    data = _send_request("GET", url, pat)
+    needle = definition_name.lower()
+    return [
+        (d["name"], d["id"])
+        for d in data.get("value", [])
+        if needle in d["name"].lower()
+    ]

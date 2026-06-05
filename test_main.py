@@ -16,5 +16,26 @@ class AuthAndTransportTests(unittest.TestCase):
             main._send_request("GET", "https://example/x", "PAT")
 
 
+class AzureRequestShapingTests(unittest.TestCase):
+    def test_find_release_definition_shapes_request_and_fuzzy_filters(self):
+        captured = {}
+
+        def fake_send(method, url, pat, body=None):
+            captured.update(method=method, url=url, pat=pat, body=body)
+            return {"value": [
+                {"id": 10, "name": "Deploy-App"},
+                {"id": 11, "name": "Build-Lib"},
+            ]}
+
+        with patch.object(main, "_send_request", side_effect=fake_send):
+            result = main.find_release_definition("PAT", "app")
+
+        self.assertEqual(captured["method"], "GET")
+        self.assertIn("/definitions", captured["url"])
+        self.assertIn("searchText=app", captured["url"])
+        self.assertEqual(captured["pat"], "PAT")
+        self.assertEqual(result, [("Deploy-App", 10)])
+
+
 if __name__ == "__main__":
     unittest.main()
