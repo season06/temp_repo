@@ -83,7 +83,7 @@ class ReleaseRunner:
                 continue
             seen.add(task.id)
 
-            new_dep = await poll_task(task)
+            new_dep = await poll_task(task, self.release.id)
             if new_dep and new_dep.id not in tasks:
                 tasks[new_dep.id] = new_dep
                 worklist.append(new_dep)
@@ -161,8 +161,9 @@ async def get_release_metadata() -> list:
 #     "dependency_task_id": ...,
 #     "dependency_task_name": "...",
 # }
-async def get_release_task_info(task_id) -> dict:
-    """Return the latest task status from the mock file."""
+async def get_release_task_info(release_id, task_id, task_name) -> dict:
+    """Return the latest task status. Mock keys off task_id only; release_id and
+    task_name are unused here but required to address the task in the prod API."""
     data = await read_mock_api_file()
     task_data = data["tasks"].get(str(task_id))
     if task_data is None:
@@ -205,10 +206,10 @@ def chain_terminal(root_id: int, tasks: dict) -> bool:
 
 
 # PROD PORTABLE: error handling lives here so callers can stay pure.
-async def fetch_task_update(task_id) -> TaskUpdate:
+async def fetch_task_update(release_id, task_id, task_name) -> TaskUpdate:
     """Fetch latest task state via the API. Return an Error update if the call fails."""
     try:
-        info = await get_release_task_info(task_id)
+        info = await get_release_task_info(release_id, task_id, task_name)
     except Exception:
         return TaskUpdate(status="Error")
     return TaskUpdate(
@@ -219,12 +220,12 @@ async def fetch_task_update(task_id) -> TaskUpdate:
 
 
 # PROD PORTABLE: pure mutator — no IO, no error handling.
-async def poll_task(task):
+async def poll_task(task, release_id):
     """Apply the latest update to a task. Return the newly discovered dependency, if any."""
     if is_terminate_status(task.status):
         return None
 
-    update = await fetch_task_update(task.id)
+    update = await fetch_task_update(release_id, task.id, task.name)
     task.status = update.status
     task.dependency_id = update.dependency_id
     task.dependency_name = update.dependency_name
@@ -296,7 +297,7 @@ async def render_loop(runners: list, tasks: dict, writer: LiveWriter) -> None:
 
 
 # PROD PORTABLE with one prod change: replace be_trigger_release with real input source.
-async def main() -> None:
+async def monitor() -> None:
     """Run the trigger-and-monitor loop until every release's queue is drained."""
     be_trigger_release: list = [
         ("release-1", ["task-a", "task-c"]),
@@ -322,4 +323,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(monitor())

@@ -135,27 +135,27 @@ class AsyncApiTests(IsolatedAsyncioTestCase):
         self.assertEqual(releases[0].available_tasks[0].id, 101)
 
     async def test_get_release_task_info_returns_dict(self):
-        info = await monitor.get_release_task_info(101)
+        info = await monitor.get_release_task_info(1, 101, "task-a")
         self.assertEqual(info["status"], "NotStarted")
         self.assertEqual(info["dependency_task_id"], 102)
 
     async def test_get_release_task_info_raises_on_unknown(self):
         with self.assertRaises(KeyError):
-            await monitor.get_release_task_info(999)
+            await monitor.get_release_task_info(1, 999, "task-x")
 
     async def test_trigger_task_sets_status_to_inprogress(self):
         await monitor.trigger_task(101)
-        info = await monitor.get_release_task_info(101)
+        info = await monitor.get_release_task_info(1, 101, "task-a")
         self.assertEqual(info["status"], "InProgress")
 
     async def test_trigger_task_is_idempotent(self):
         await monitor.trigger_task(101)
         await monitor.trigger_task(101)
-        info = await monitor.get_release_task_info(101)
+        info = await monitor.get_release_task_info(1, 101, "task-a")
         self.assertEqual(info["status"], "InProgress")
 
     async def test_fetch_task_update_returns_error_on_failure(self):
-        update = await monitor.fetch_task_update(999)
+        update = await monitor.fetch_task_update(1, 999, "task-x")
         self.assertEqual(update.status, "Error")
         self.assertIsNone(update.dependency_id)
 
@@ -164,11 +164,11 @@ class PollTaskAsyncTests(IsolatedAsyncioTestCase):
     async def test_poll_task_updates_in_place(self):
         task = monitor.Task(id=101, name="task-a")
 
-        async def fake_fetch(task_id):
+        async def fake_fetch(release_id, task_id, task_name):
             return monitor.TaskUpdate(status="InProgress", dependency_id=102, dependency_name="task-b")
 
         with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            new_dep = await monitor.poll_task(task)
+            new_dep = await monitor.poll_task(task, 1)
 
         self.assertEqual(task.status, "InProgress")
         self.assertEqual(task.dependency_id, 102)
@@ -179,22 +179,22 @@ class PollTaskAsyncTests(IsolatedAsyncioTestCase):
     async def test_poll_task_skips_when_terminal(self):
         task = monitor.Task(id=101, name="task-a", status="Successed")
 
-        async def fake_fetch(task_id):
+        async def fake_fetch(release_id, task_id, task_name):
             raise AssertionError("should not be called")
 
         with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            result = await monitor.poll_task(task)
+            result = await monitor.poll_task(task, 1)
 
         self.assertIsNone(result)
 
     async def test_poll_task_returns_none_when_no_dep(self):
         task = monitor.Task(id=102, name="task-b")
 
-        async def fake_fetch(task_id):
+        async def fake_fetch(release_id, task_id, task_name):
             return monitor.TaskUpdate(status="InProgress")
 
         with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
-            result = await monitor.poll_task(task)
+            result = await monitor.poll_task(task, 1)
 
         self.assertIsNone(result)
 
@@ -220,7 +220,7 @@ class PollChainTests(IsolatedAsyncioTestCase):
             102: monitor.TaskUpdate(status="NotStarted"),
         }
 
-        async def fake_fetch(task_id):
+        async def fake_fetch(release_id, task_id, task_name):
             return responses[task_id]
 
         with patch.object(monitor, "fetch_task_update", side_effect=fake_fetch):
@@ -261,7 +261,7 @@ class ReleaseRunnerRunTests(IsolatedAsyncioTestCase):
             201: monitor.TaskUpdate(status="Successed"),
         }
 
-        async def fake_fetch(task_id):
+        async def fake_fetch(release_id, task_id, task_name):
             return status_table[task_id]
 
         with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
@@ -286,7 +286,7 @@ class ReleaseRunnerRunTests(IsolatedAsyncioTestCase):
         async def fake_trigger(tid):
             trigger_order.append(tid)
 
-        async def fake_fetch(task_id):
+        async def fake_fetch(release_id, task_id, task_name):
             poll_count[task_id] += 1
             if task_id == 101:
                 return monitor.TaskUpdate(status="Successed", dependency_id=102, dependency_name="task-b")
@@ -321,7 +321,7 @@ class ReleaseRunnerRunTests(IsolatedAsyncioTestCase):
             if tid == 101:
                 raise ConnectionError("simulated")
 
-        async def fake_fetch(task_id):
+        async def fake_fetch(release_id, task_id, task_name):
             return monitor.TaskUpdate(status="Successed")
 
         with patch.object(monitor, "trigger_task", side_effect=fake_trigger), \
@@ -343,7 +343,7 @@ class ReleaseRunnerRunTests(IsolatedAsyncioTestCase):
         async def fake_trigger(tid):
             trigger_order.append(tid)
 
-        async def fake_fetch(task_id):
+        async def fake_fetch(release_id, task_id, task_name):
             if task_id == 101:
                 return monitor.TaskUpdate(status="Failed")
             return monitor.TaskUpdate(status="Successed")
