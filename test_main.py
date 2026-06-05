@@ -102,5 +102,40 @@ class ParseSelectionTests(unittest.TestCase):
             main.parse_selection("x", 3)
 
 
+class AzureApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_task_info_maps_environment_status(self):
+        def fake_get_release(pat, release_id):
+            return {"name": "rel", "environments": [
+                {"id": 5, "name": "stage-1", "status": "inProgress"},
+            ]}
+
+        with patch.object(main, "get_release", side_effect=fake_get_release):
+            api = main.AzureApi("PAT")
+            info = await api.get_task_info(1, 5, "stage-1")
+
+        self.assertEqual(info["status"], "inProgress")
+        self.assertIsNone(info["dependency_task_id"])
+        self.assertIsNone(info["dependency_task_name"])
+
+    async def test_get_task_info_unknown_environment_is_unknown(self):
+        with patch.object(main, "get_release", side_effect=lambda p, r: {"environments": []}):
+            api = main.AzureApi("PAT")
+            info = await api.get_task_info(1, 999, "missing")
+        self.assertEqual(info["status"], "Unknown")
+
+    async def test_trigger_task_calls_trigger_release_task(self):
+        calls = []
+
+        def fake_trigger(pat, release_id, env_id):
+            calls.append((pat, release_id, env_id))
+            return {}
+
+        with patch.object(main, "trigger_release_task", side_effect=fake_trigger):
+            api = main.AzureApi("PAT")
+            await api.trigger_task(1, 5)
+
+        self.assertEqual(calls, [("PAT", 1, 5)])
+
+
 if __name__ == "__main__":
     unittest.main()

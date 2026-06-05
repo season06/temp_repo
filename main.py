@@ -84,3 +84,28 @@ def parse_selection(raw, count) -> list:
     if not indices:
         raise ValueError("no selection")
     return indices
+
+
+# ========= API seam =========
+
+class AzureApi:
+    """Monitor API seam backed by Azure REST (stubbed HTTP). Blocking REST calls
+    are offloaded to threads so they fit the async runner.
+
+    Dependency cascade is not derived from Azure environment conditions in this
+    iteration; deps are reported as None (each environment is triggered explicitly)."""
+
+    def __init__(self, pat):
+        self.pat = pat
+
+    async def trigger_task(self, release_id, task_id) -> None:
+        await asyncio.to_thread(trigger_release_task, self.pat, release_id, task_id)
+
+    async def get_task_info(self, release_id, task_id, task_name) -> dict:
+        data = await asyncio.to_thread(get_release, self.pat, release_id)
+        env = next((e for e in data.get("environments", []) if e["id"] == task_id), None)
+        return {
+            "status": env["status"] if env else "Unknown",
+            "dependency_task_id": None,
+            "dependency_task_name": None,
+        }
