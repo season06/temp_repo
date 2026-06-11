@@ -1,0 +1,185 @@
+.diff-page {
+  padding: 1rem;
+  background: var(--surface-ground);
+}
+
+.diff-summary {
+  margin-bottom: 1rem;
+}
+
+.summary-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: var(--text-color);
+  margin-bottom: 0.75rem;
+}
+
+.summary-dot,
+.column-marker {
+  width: 0.5rem;
+  height: 0.5rem;
+  display: inline-block;
+  background: var(--orange-500);
+  border-radius: 2px;
+}
+
+.failed-fabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--red-300);
+  background: var(--red-50);
+  border-radius: 6px;
+}
+
+.failed-text {
+  font-weight: 600;
+  color: var(--red-700);
+  margin-right: 0.25rem;
+}
+
+.diff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  gap: 1rem;
+}
+
+.panel-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.distinct-count {
+  color: var(--text-color-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.value-group {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 64px minmax(180px, 1.5fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.25rem 0;
+}
+
+.value-text {
+  font-weight: 600;
+  color: var(--text-color);
+  word-break: break-all;
+}
+
+.value-count {
+  font-weight: 700;
+  color: var(--text-color);
+  white-space: nowrap;
+}
+
+.fab-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+/*
+  p-message 預設比較像 message block，
+  這裡把它縮成接近 chip / tag 的感覺。
+*/
+:host ::ng-deep .diff-panel-accent {
+  position: relative;
+}
+
+/* 左側金色直線 accent bar */
+:host ::ng-deep .diff-panel-accent .p-panel-header {
+  position: relative;
+  border-left: 4px solid #b77905;
+  padding-left: 1.25rem;
+  background-color: rgb(245, 245, 245);
+}
+
+/* header 內容 */
+.diff-panel-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.diff-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* CPNT_ID 前面的小方塊 leading marker */
+.title-marker {
+  width: 0.55rem;
+  height: 0.55rem;
+  background: #b77905;
+  border-radius: 2px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.column-name {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.12rem;
+  color: var(--text-color);
+}
+
+.distinct-count {
+  color: var(--text-color-secondary);
+  font-size: 0.875rem;
+}
+
+.value-group {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 64px minmax(180px, 1.5fr);
+  align-items: center;
+  margin-top: 1rem;
+  padding: 0.25rem 0 0 0;
+}
+
+.value-text {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.value-count {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+:host ::ng-deep .fab-message {
+  display: inline-flex;
+  width: auto;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+:host ::ng-deep .fab-message .p-message-content {
+  padding: 0;
+}

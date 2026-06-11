@@ -1,0 +1,69 @@
+<div class="diff-page">
+  <section class="diff-summary">
+    <div class="summary-title">
+      <span class="summary-dot"></span>
+      {{ distinctColumnCount }} columns diverge across {{ totalFabCount }} fabs
+    </div>
+
+    <div class="failed-fabs">
+      <span class="failed-text">
+        {{ failedFabs.length }} fab(s) failed and are excluded from results.
+      </span>
+
+      <p-message
+        *ngFor="let fab of failedFabs"
+        severity="error"
+        variant="outlined"
+        size="small"
+        styleClass="fab-message"
+      >
+        {{ fab.name }}
+      </p-message>
+    </div>
+  </section>
+
+  <section class="diff-grid">
+    <p-panel
+      *ngFor="let column of diffColumns"
+      [toggleable]="true"
+      toggler="header"
+      styleClass="diff-panel diff-panel-accent"
+    >
+      <ng-template pTemplate="header">
+        <div class="diff-panel-header">
+          <div class="diff-panel-title">
+            <span class="title-marker"></span>
+            <span class="column-name">{{ column.columnName }}</span>
+          </div>
+
+          <div class="distinct-count">
+            {{ column.groups.length }} distinct values
+          </div>
+        </div>
+      </ng-template>
+
+      <ng-container *ngFor="let group of column.groups; let last = last">
+        <div class="value-group">
+          <div class="value-text">
+            {{ group.value }}
+          </div>
+
+          <div class="value-count"></div>
+
+          <div class="fab-list">
+            <p-message
+              *ngFor="let fab of group.fabs"
+              [severity]="fab.status === 'majority' ? 'success' : 'warn'"
+              size="small"
+              styleClass="fab-message"
+            >
+              {{ fab.name }}
+            </p-message>
+          </div>
+        </div>
+
+        <p-divider *ngIf="!last" type="dotted"></p-divider>
+      </ng-container>
+    </p-panel>
+  </section>
+</div>
