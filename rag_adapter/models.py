@@ -41,7 +41,7 @@ class RetrievedChunk:
 class Citation:
     """ContextBuilder/Generator 產出的引用。"""
     chunk_id: str
-    source_ref: SourceRef
+    source_ref: SourceRef = None
 
 
 @dataclass

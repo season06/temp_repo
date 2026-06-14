@@ -45,6 +45,8 @@ class InMemoryVectorStore:
         target = embedding[0]
         scored = []
         for chunk in self._chunks.values():
+            if chunk.embedding is None:
+                raise ValueError(f"chunk {chunk.id} has no embedding; embed before upsert")
             distance = abs(chunk.embedding[0] - target)
             scored.append(RetrievedChunk(chunk=chunk, score=-distance))
         scored.sort(key=lambda rc: rc.score, reverse=True)
