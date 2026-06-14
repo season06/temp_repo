@@ -87,3 +87,13 @@ def test_query_pipeline_stream_yields_tokens():
 
     assert len(tokens) > 0
     assert "Question:" in " ".join(tokens)
+
+
+def test_public_exports():
+    import rag_adapter
+
+    assert hasattr(rag_adapter, "IndexingPipeline")
+    assert hasattr(rag_adapter, "QueryPipeline")
+    assert hasattr(rag_adapter, "Document")
+    assert hasattr(rag_adapter, "Chunk")
+    assert hasattr(rag_adapter, "Answer")
