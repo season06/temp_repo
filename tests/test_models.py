@@ -44,3 +44,24 @@ def test_answer_holds_citations():
     answer = Answer(text="result", citations=[cit])
     assert answer.text == "result"
     assert answer.citations[0].chunk_id == "c1"
+
+
+def test_interfaces_are_importable():
+    from rag_adapter import interfaces
+
+    expected = [
+        "Loader",
+        "Parser",
+        "Chunker",
+        "Embedder",
+        "VectorStore",
+        "QueryTransform",
+        "Retriever",
+        "Fusion",
+        "Reranker",
+        "ContextBuilder",
+        "PromptBuilder",
+        "Generator",
+    ]
+    for name in expected:
+        assert hasattr(interfaces, name), name
