@@ -1,16 +1,75 @@
+from __future__ import annotations
+
 import os
 import re
+from dataclasses import dataclass, field
 
 import yaml
 
-from rag_adapter.loaders.file_loader import FileLoader
-from rag_adapter.loaders.http_loaders import UrlLoader, TkmsLoader
-from rag_adapter.parsers.html_parser import HtmlParser
-from rag_adapter.parsers.structured_parsers import JsonParser, XmlParser
-from rag_adapter.chunkers.character_chunker import CharacterChunker
-from rag_adapter.embedders.qwen_embedder import QwenEmbedder
-from rag_adapter.vectorstores.qdrant_store import QdrantVectorStore
-from rag_adapter.pipeline.indexing import IndexingPipeline
+
+@dataclass(frozen=True)
+class LoaderConfig:
+    type: str = "file"
+    loader_name: str = "file"
+    base_url: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.type == "tkms" and not self.base_url:
+            raise ValueError("tkms loader requires base_url")
+
+
+@dataclass(frozen=True)
+class ParserConfig:
+    type: str = "html"
+
+
+@dataclass(frozen=True)
+class ChunkerConfig:
+    type: str = "character"
+    chunk_size: int = 800
+    chunk_overlap: int = 100
+
+    def __post_init__(self) -> None:
+        if self.chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than 0")
+        if self.chunk_overlap < 0:
+            raise ValueError("chunk_overlap must be greater than or equal to 0")
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
+
+
+@dataclass(frozen=True)
+class EmbedderConfig:
+    type: str = "qwen"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = "qwen-embedding"
+    batch_size: int = 16
+
+    def __post_init__(self) -> None:
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0")
+
+
+@dataclass(frozen=True)
+class VectorStoreConfig:
+    type: str = "qdrant"
+    url: str = "http://localhost:6333"
+    collection: str = "documents"
+
+
+@dataclass(frozen=True)
+class IndexingConfig:
+    loader: LoaderConfig = field(default_factory=LoaderConfig)
+    parser: ParserConfig = field(default_factory=ParserConfig)
+    chunker: ChunkerConfig = field(default_factory=ChunkerConfig)
+    embedder: EmbedderConfig = field(default_factory=EmbedderConfig)
+    vector_store: VectorStoreConfig = field(default_factory=VectorStoreConfig)
+
+
+@dataclass(frozen=True)
+class RagConfig:
+    indexing: IndexingConfig = field(default_factory=IndexingConfig)
 
 
 _ENV_PATTERN = re.compile(r"\$\{ENV:([^}]+)\}")
@@ -26,71 +85,23 @@ def _interpolate(value):
     return value
 
 
-def load_config(path):
-    """讀取 YAML 配置,並把 ${ENV:VAR} 以環境變數插值。"""
-    with open(path, encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle)
-    return _interpolate(raw)
-
-
-def _build_loader(spec):
-    spec = dict(spec)
-    kind = spec.pop("type")
-    if kind == "file":
-        return FileLoader(**spec)
-    if kind == "url":
-        return UrlLoader(**spec)
-    if kind == "tkms":
-        return TkmsLoader(**spec)
-    raise ValueError(f"unknown loader type: {kind}")
-
-
-def _build_parser(spec):
-    kind = spec["type"]
-    if kind == "html":
-        return HtmlParser()
-    if kind == "json":
-        return JsonParser()
-    if kind == "xml":
-        return XmlParser()
-    raise ValueError(f"unknown parser type: {kind}")
-
-
-def _build_chunker(spec):
-    spec = dict(spec)
-    kind = spec.pop("type")
-    if kind == "character":
-        return CharacterChunker(**spec)
-    raise ValueError(f"unknown chunker type: {kind}")
-
-
-def _build_embedder(spec):
-    spec = dict(spec)
-    kind = spec.pop("type")
-    if kind == "qwen":
-        return QwenEmbedder(**spec)
-    raise ValueError(f"unknown embedder type: {kind}")
-
-
-def _build_vector_store(spec):
-    spec = dict(spec)
-    kind = spec.pop("type")
-    if kind == "qdrant":
-        from qdrant_client import AsyncQdrantClient
-
-        url = spec.pop("url")
-        collection = spec.pop("collection")
-        return QdrantVectorStore(client=AsyncQdrantClient(url=url), collection=collection)
-    raise ValueError(f"unknown vector store type: {kind}")
-
-
-def build_indexing_pipeline(config):
-    """依 config 的 indexing 區塊組裝 IndexingPipeline。"""
-    indexing = config["indexing"]
-    return IndexingPipeline(
-        loader=_build_loader(indexing["loader"]),
-        parser=_build_parser(indexing["parser"]),
-        chunker=_build_chunker(indexing["chunker"]),
-        embedder=_build_embedder(indexing["embedder"]),
-        vector_store=_build_vector_store(indexing["vector_store"]),
+def _indexing_from_dict(raw: dict) -> IndexingConfig:
+    return IndexingConfig(
+        loader=LoaderConfig(**raw.get("loader", {})),
+        parser=ParserConfig(**raw.get("parser", {})),
+        chunker=ChunkerConfig(**raw.get("chunker", {})),
+        embedder=EmbedderConfig(**raw.get("embedder", {})),
+        vector_store=VectorStoreConfig(**raw.get("vector_store", {})),
     )
+
+
+def from_dict(raw: dict) -> RagConfig:
+    """把已插值的 dict 轉成 typed RagConfig。"""
+    return RagConfig(indexing=_indexing_from_dict(raw.get("indexing", {})))
+
+
+def load_config(path: str) -> RagConfig:
+    """讀取 YAML 配置,把 ${ENV:VAR} 以環境變數插值,回傳 typed RagConfig。"""
+    with open(path, encoding="utf-8") as handle:
+        raw = _interpolate(yaml.safe_load(handle) or {})
+    return from_dict(raw)

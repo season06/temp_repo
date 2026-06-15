@@ -126,3 +126,15 @@ Query:     [QueryTransform?] → Retriever(cosine / BM25) → Fusion(RRF) → Re
 - 型別註記從簡:僅在需要時標註 `dict` / `list`,不引入 `typing` imports、不標註基本型別
 - 觀測與評估皆為可插拔,預設不開啟也能跑主流程
 - Generator 支援一次性與 streaming 兩種輸出
+
+---
+
+## 7. Design Patterns
+
+1. **Interface-Driven**:所有模組透過 `Protocol` 定義介面,實作可替換。
+2. **Type-First**:資料結構以 dataclass 定義(`models.py`)。本專案採「最小型別註記」——資料層用 dataclass 即達標,函式簽章不強制標型別。
+3. **Async-First(僅 I/O 層)**:有 I/O 的層(Loader / Embedder / VectorStore / Retriever / Reranker / Generator)以 `async/await` 實作;純 CPU 層(Parser / Chunker / Fusion / ContextBuilder / PromptBuilder / QueryTransform)維持同步。Pipeline 於 I/O 步驟 `await`,`Generator.stream` 為 async generator。
+4. **Config-Driven**:透過 YAML 配置選擇各層 provider 與參數,由 config 工廠組裝 pipeline;secrets 以環境變數插值。
+5. **Pipeline**:`IndexingPipeline` / `QueryPipeline` 串接元件。
+
+> 套用順序:先重構已完成的 P1/P2 達成上述 patterns,再以新標準寫 P3–P5。

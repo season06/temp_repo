@@ -1,11 +1,8 @@
 import textwrap
 
-from rag_adapter.config import load_config, build_indexing_pipeline
-from rag_adapter.loaders.file_loader import FileLoader
-from rag_adapter.parsers.html_parser import HtmlParser
-from rag_adapter.chunkers.character_chunker import CharacterChunker
-from rag_adapter.embedders.qwen_embedder import QwenEmbedder
-from rag_adapter.vectorstores.qdrant_store import QdrantVectorStore
+import pytest
+
+from rag_adapter.config import load_config, from_dict, RagConfig, ChunkerConfig, LoaderConfig
 
 
 _YAML = """
@@ -37,25 +34,31 @@ def _write_cfg(tmp_path):
     return str(cfg)
 
 
-def test_load_config_interpolates_env(tmp_path, monkeypatch):
+def test_load_config_returns_typed_config_with_env_interpolation(tmp_path, monkeypatch):
     monkeypatch.setenv("QWEN_KEY", "secret-123")
 
     config = load_config(_write_cfg(tmp_path))
 
-    assert config["indexing"]["embedder"]["api_key"] == "secret-123"
+    assert isinstance(config, RagConfig)
+    assert config.indexing.embedder.api_key == "secret-123"
+    assert config.indexing.chunker.chunk_size == 500
+    assert config.indexing.vector_store.collection == "docs"
+    assert config.indexing.loader.loader_name == "html"
 
 
-def test_build_indexing_pipeline_from_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("QWEN_KEY", "secret-123")
-    config = load_config(_write_cfg(tmp_path))
+def test_defaults_applied_when_sections_missing():
+    config = from_dict({})
 
-    pipeline = build_indexing_pipeline(config)
+    assert config.indexing.chunker.type == "character"
+    assert config.indexing.embedder.type == "qwen"
+    assert config.indexing.vector_store.url == "http://localhost:6333"
 
-    assert isinstance(pipeline._loader, FileLoader)
-    assert isinstance(pipeline._parser, HtmlParser)
-    assert isinstance(pipeline._chunker, CharacterChunker)
-    assert isinstance(pipeline._embedder, QwenEmbedder)
-    assert isinstance(pipeline._vector_store, QdrantVectorStore)
-    assert pipeline._embedder._api_key == "secret-123"
-    assert pipeline._chunker._chunk_size == 500
-    assert pipeline._vector_store._collection == "docs"
+
+def test_chunker_config_validates_overlap():
+    with pytest.raises(ValueError):
+        ChunkerConfig(chunk_size=10, chunk_overlap=10)
+
+
+def test_tkms_loader_config_requires_base_url():
+    with pytest.raises(ValueError):
+        LoaderConfig(type="tkms")

@@ -1,0 +1,23 @@
+# RAG Adapter — indexing 配置範例(config-driven)
+# 用法見 examples/indexing_quickstart.py 檔尾的 config 驅動段落。
+# secrets 以 ${ENV:VAR} 從環境變數插值。
+indexing:
+  loader:
+    type: file          # file | url | tkms
+    loader_name: html
+  parser:
+    type: html          # html | json | xml
+  chunker:
+    type: character
+    chunk_size: 800
+    chunk_overlap: 100
+  embedder:
+    type: qwen
+    base_url: ${ENV:QWEN_BASE_URL}   # OpenAI 相容 /embeddings 端點
+    api_key: ${ENV:QWEN_API_KEY}
+    model: qwen-embedding
+    batch_size: 16
+  vector_store:
+    type: qdrant
+    url: http://localhost:6333
+    collection: documents
