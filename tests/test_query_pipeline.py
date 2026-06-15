@@ -89,3 +89,39 @@ def test_public_exports():
     assert hasattr(rag_adapter, "Document")
     assert hasattr(rag_adapter, "Chunk")
     assert hasattr(rag_adapter, "Answer")
+
+
+async def test_query_pipeline_retrieve_context_without_generator():
+    store, chunks = _build_store()
+    await store.upsert(chunks)
+    embedder = EchoEmbedder()
+    pipeline = QueryPipeline(
+        retrievers=[VectorRetriever(embedder, store)],
+        fusion=PassthroughFusion(),
+        reranker=NoopReranker(),
+        context_builder=SimpleContextBuilder(),
+        top_k=2,
+    )
+
+    built = await pipeline.retrieve_context("aaaa")
+
+    assert "aaaa" in built["context"]
+    assert [c.chunk_id for c in built["citations"]]
+
+
+async def test_answer_without_generator_raises():
+    import pytest
+
+    store, chunks = _build_store()
+    await store.upsert(chunks)
+    embedder = EchoEmbedder()
+    pipeline = QueryPipeline(
+        retrievers=[VectorRetriever(embedder, store)],
+        fusion=PassthroughFusion(),
+        reranker=NoopReranker(),
+        context_builder=SimpleContextBuilder(),
+        top_k=2,
+    )
+
+    with pytest.raises(RuntimeError):
+        await pipeline.answer("aaaa")
