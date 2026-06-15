@@ -20,12 +20,12 @@ class PassthroughChunker:
 
 class EchoEmbedder:
     """以文字長度當作 1 維向量,方便確定性測試。"""
-    def embed(self, chunks):
+    async def embed(self, chunks):
         for chunk in chunks:
             chunk.embedding = [float(len(chunk.text))]
         return chunks
 
-    def embed_query(self, text):
+    async def embed_query(self, text):
         return [float(len(text))]
 
 
@@ -33,15 +33,15 @@ class InMemoryVectorStore:
     def __init__(self):
         self._chunks = {}
 
-    def upsert(self, chunks):
+    async def upsert(self, chunks):
         for chunk in chunks:
             self._chunks[chunk.id] = chunk
 
-    def delete(self, chunk_ids):
+    async def delete(self, chunk_ids):
         for cid in chunk_ids:
             self._chunks.pop(cid, None)
 
-    def search(self, embedding, top_k):
+    async def search(self, embedding, top_k):
         target = embedding[0]
         scored = []
         for chunk in self._chunks.values():
@@ -59,9 +59,9 @@ class VectorRetriever:
         self._embedder = embedder
         self._store = store
 
-    def retrieve(self, query, top_k):
-        embedding = self._embedder.embed_query(query)
-        return self._store.search(embedding, top_k)
+    async def retrieve(self, query, top_k):
+        embedding = await self._embedder.embed_query(query)
+        return await self._store.search(embedding, top_k)
 
 
 class PassthroughFusion:
@@ -72,7 +72,7 @@ class PassthroughFusion:
 
 
 class NoopReranker:
-    def rerank(self, query, candidates, top_k):
+    async def rerank(self, query, candidates, top_k):
         return candidates[:top_k]
 
 
@@ -93,9 +93,9 @@ class TemplatePromptBuilder:
 
 class EchoGenerator:
     """把 prompt 前綴回去,作為確定性的假 LLM。"""
-    def generate(self, prompt, citations):
+    async def generate(self, prompt, citations):
         return Answer(text=f"ANSWER: {prompt}", citations=list(citations))
 
-    def stream(self, prompt, citations):
+    async def stream(self, prompt, citations):
         for token in prompt.split():
             yield token

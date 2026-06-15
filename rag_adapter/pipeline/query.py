@@ -1,6 +1,6 @@
 class QueryPipeline:
     """依序執行 (transform?) → retrieve(多路) → fuse → rerank → build context
-    → build prompt → generate。各層皆為注入的 Protocol 實作。
+    → build prompt → generate。I/O 步驟以 await 執行;stream 為 async generator。
 
     query_transform 為可選;傳入 None 時跳過。
     """
@@ -25,20 +25,23 @@ class QueryPipeline:
         self._top_k = top_k
         self._query_transform = query_transform
 
-    def _prepare(self, query):
+    async def _prepare(self, query):
         if self._query_transform is not None:
             query = self._query_transform.transform(query)
-        ranked_lists = [r.retrieve(query, self._top_k) for r in self._retrievers]
+        ranked_lists = []
+        for retriever in self._retrievers:
+            ranked_lists.append(await retriever.retrieve(query, self._top_k))
         fused = self._fusion.fuse(ranked_lists, self._top_k)
-        reranked = self._reranker.rerank(query, fused, self._top_k)
+        reranked = await self._reranker.rerank(query, fused, self._top_k)
         built = self._context_builder.build(query, reranked)
         prompt = self._prompt_builder.build_prompt(query, built["context"])
         return prompt, built["citations"]
 
-    def answer(self, query):
-        prompt, citations = self._prepare(query)
-        return self._generator.generate(prompt, citations)
+    async def answer(self, query):
+        prompt, citations = await self._prepare(query)
+        return await self._generator.generate(prompt, citations)
 
-    def stream(self, query):
-        prompt, citations = self._prepare(query)
-        return self._generator.stream(prompt, citations)
+    async def stream(self, query):
+        prompt, citations = await self._prepare(query)
+        async for token in self._generator.stream(prompt, citations):
+            yield token
