@@ -1,6 +1,8 @@
 # RAG Adapter SDK
 
-一套可供多數專案使用的 **RAG Adapter SDK**: 把資料接入、解析、切分、Embedding、索引、檢索、重排、上下文組裝抽象成**可替換模組**,讓不同團隊依需求替換模型、向量庫、資料來源與檢索策略。
+RAG Adapter SDK 是提供多專案場景設計的通用系統開發工具包。
+旨在協助不同業務團隊依據專案需求，靈活且彈性地替換底層 Model、Vector DB、Data Source 與 Retrieval Strategy。
+將複雜的 RAG 流程抽象化為可插拔的模組化元件，大幅提升 RAG 系統的開發效率與擴充性 —— 涵蓋 Data Ingestion、Parsing、Chunking、Embedding、Indexing、Retrieval、Reranking 與 Context Prompting。
 
 ## Current Supports
 
@@ -16,19 +18,20 @@
 
 ---
 
-# (for User)
+## (for User)
 
-RAG Adapter SDK 是一個 Python library
-撰寫少量程式碼即可組裝一條 RAG pipeline, 以 config 方式快速替換 provider (包含 Data Source / Model / VectorDB / Retrieval Strategy)
+RAG Adapter SDK 是一款基於 Python 開發的輕量化函式庫（Library）。
+開發者僅需撰寫極少量的程式碼，即可快速組裝出標準的 RAG Pipeline。
+採用 Config-Driven 設計，支援以 config 設定檔一鍵切換與管理 Provider 節點。
 
-## Installation
+### Installation
 
 ```bash
 pip install -e ".[all]"     # 含 html / http / qdrant 等 provider 相依
 # 或只裝需要的:pip install -e ".[html,qdrant]"
 ```
 
-## Quick-Start: 建立 indexing pipeline
+### Quick-Start: 建立 indexing pipeline
 
 可直接執行的範例(使用 in-memory 假 embedder / store,無需外部服務):
 
@@ -60,7 +63,7 @@ count = asyncio.run(pipeline.index("./your_docs"))
 
 要換成正式 provider,只需替換對應參數,**pipeline 結構不變**——這就是「可替換」的核心。
 
-## Config-Driven (正式環境)
+### Config-Driven (正式環境)
 
 不想在程式裡手動組裝,可用 YAML 配置(secrets 以 `${ENV:VAR}` 從環境變數插值):
 
@@ -88,13 +91,11 @@ pipeline = build_indexing_pipeline(config)   # 需 Qdrant server + Qwen API
 
 ---
 
-# (for Developer)
+## (for Developer)
 
-## Design Pattern ↔ Code Base
+### Design Pattern ↔ Code Base
 
-設計依循 5 個 pattern(詳見設計規格書 §7)。下表是「pattern → 實際落在哪些檔案」:
-
-| Pattern | Description | Source Code |
+| Pattern | Description | Code Base |
 |---------|-------------|-------------|
 | **Interface-Driven** | 所有模組透過 `Protocol` 定義介面,實作可替換 | `rag_adapter/interfaces.py`(12 個 `@runtime_checkable` Protocol) |
 | **Type-First** | 以 dataclass 定義資料結構 | 資料模型 `rag_adapter/models.py`;config schema `rag_adapter/config.py`(frozen dataclass + `__post_init__` 驗證) |
@@ -102,45 +103,46 @@ pipeline = build_indexing_pipeline(config)   # 需 Qdrant server + Qwen API
 | **Config-Driven** | YAML 配置 → 工廠組裝 pipeline | `rag_adapter/config.py`(只做 config:載入/驗證/插值)、`rag_adapter/factory.py`(根據 config 建 pipeline) |
 | **Pipeline** | 以 Pipeline 串接元件 | `rag_adapter/pipeline/indexing.py`、`rag_adapter/pipeline/query.py` |
 
-## 架構分層
+## Pipeline Flow
 
 ```
-資料流(Indexing):  Loader → Parser → Chunker → Embedder → VectorStore
-資料流(Query):     Retriever(多路) → Fusion → Reranker → ContextBuilder → (PromptBuilder → Generator)
-貫穿全程的契約:     rag_adapter/models.py 的 Document / Chunk / RetrievedChunk / Citation / Answer
-組裝:              config.py(YAML→RagConfig) → factory.py → pipeline/
+Indexing Pipeline: Loader → Parser → Chunker → Embedder → VectorStore
+Query Pipeline:    Retriever(多路) → Fusion → Reranker → ContextBuilder → (PromptBuilder → Generator)
+Combination:       config.py(YAML→RagConfig) → factory.py → pipeline/
 ```
 
-**關鍵職責邊界:**
+**Key Responsibility:**
 - `config.py` 只負責配置(載入 / 驗證 / 持有 typed `RagConfig`),**不 import 任何 provider**。
 - `factory.py` 負責「config → 建立 provider → 組裝 pipeline」,是 config 與實作之間的唯一橋樑。
 - `pipeline/*` 只負責「依序呼叫注入的各層」,不含任何 provider 邏輯。
 - `interfaces.py` 只定義 Protocol,無實作。
 
-## Async 邊界(務必遵守)
+## Async 邊界 (務必遵守)
 
-Async **只套 I/O 層**。pipeline 在 I/O 步驟 `await`,CPU 步驟直接呼叫:
+Async **只套 I/O 層**。
+pipeline 在 I/O 步驟 `await`, CPU 步驟直接呼叫:
 
 | async(`async def` + await) | sync(一般 `def`) |
 |---|---|
-| Loader.load、Embedder.embed/embed_query、VectorStore.upsert/delete/search、Retriever.retrieve、Reranker.rerank、Generator.generate | Parser.parse、Chunker.chunk、Fusion.fuse、ContextBuilder.build、PromptBuilder.build_prompt、QueryTransform.transform |
+| Loader.load <br> Embedder.embed/embed_query <br> VectorStore.upsert/delete/search <br> Retriever.retrieve <br> Reranker.rerank <br> Generator.generate | Parser.parse <br> Chunker.chunk <br> Fusion.fuse <br> ContextBuilder.build <br> PromptBuilder.build_prompt <br> QueryTransform.transform |
 
-`Generator.stream` 為 async generator;`FileLoader` 以 `asyncio.to_thread` 包磁碟讀取避免阻塞事件迴圈。
+`Generator.stream` 為 async generator; `FileLoader` 以 `asyncio.to_thread` 包磁碟讀取避免阻塞事件迴圈。
 
 ## How to Create a Provider
 
-以新增一個 Embedder 為例:
+以新增 Embedder 為例:
 
-1. 在 `rag_adapter/embedders/` 新增檔案,實作 `Embedder` Protocol(`async def embed`、`async def embed_query`)——**不需繼承任何基底類別**,符合介面即可(duck typing)。
-2. 若要支援 config 驅動:在 `rag_adapter/config.py` 的 `EmbedderConfig` 加上需要的欄位,並在 `rag_adapter/factory.py` 的 `_build_embedder` 加上對應 `type` 分支。
+1. 在 `rag_adapter/embedders/` 新增檔案, 實作 `Embedder` Protocol(`async def embed`、`async def embed_query`)——**不需繼承任何基底類別**,符合介面即可(duck typing)。
+2. 若要支援 config-Driven: 在 `rag_adapter/config.py` 的 `EmbedderConfig` 加上需要的欄位,並在 `rag_adapter/factory.py` 的 `_build_embedder` 加上對應 `type` 分支。
 3. 在 `tests/` 加上單元測試(外部 I/O 用注入的假 client,見既有 `test_qwen_embedder.py`)。
 
-其餘層(Loader / Parser / Chunker / VectorStore …)做法相同:實作對應 Protocol → (選用)接 config + factory → 加測試。
+其餘層 (Loader / Parser / Chunker / VectorStore / etc) 做法相同:
+實作對應 Protocol → (optional) 接 config + factory → 加測試。
 
 ## Typing
 
-- **一般程式**:函式簽章只在參數 / 回傳為 `dict` / `list` 時標註;不引入 `typing`、不標基本型別。
-- **例外:`config.py`**:config schema 採滿型別 frozen dataclass(`int` / `str | None` / `__post_init__` 驗證),作為對外配置契約。
+- **一般程式**: 函式簽章只在參數 / 回傳為 `dict` / `list` 時標註;不引入 `typing`、不標基本型別。
+- **例外: `config.py`**:config schema 採滿型別 frozen dataclass(`int` / `str | None` / `__post_init__` 驗證),作為對外配置契約。
 
 ## Testing
 
@@ -150,8 +152,8 @@ pytest -q          # 目前 35 passed
 ```
 
 - 採 `pytest-asyncio`,`pyproject.toml` 設 `asyncio_mode = "auto"`,故 `async def test_...` 不需裝飾子。
-- I/O 層測試用注入的**假 client**(fake httpx / fake qdrant client),不碰網路或真實服務。
-- `rag_adapter/testing/mocks.py` 提供各層的 in-memory 測試替身,可用來組裝端到端 pipeline 測試(見 `test_indexing_integration.py`)。
+- I/O 層測試用注入的**mock client**(fake httpx / fake qdrant client),不碰網路或真實服務。
+- `rag_adapter/testing/mocks.py` 提供各層的 in-memory 測試替身,可用來組裝端到端 pipeline 測試 (見 `test_indexing_integration.py`)。
 
 ## Folder Structure
 
