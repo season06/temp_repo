@@ -17,13 +17,13 @@ class FakeQdrantClient:
         self.search_args = None
         self._hits = hits or []
 
-    def upsert(self, collection_name, points):
+    async def upsert(self, collection_name, points):
         self.upserted = {"collection": collection_name, "points": points}
 
-    def delete(self, collection_name, points_selector):
+    async def delete(self, collection_name, points_selector):
         self.deleted = {"collection": collection_name, "selector": points_selector}
 
-    def search(self, collection_name, query_vector, limit):
+    async def search(self, collection_name, query_vector, limit):
         self.search_args = {
             "collection": collection_name,
             "query_vector": query_vector,
@@ -36,7 +36,7 @@ def _expected_point_id(chunk_id):
     return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
 
 
-def test_upsert_maps_chunk_to_point_with_payload():
+async def test_upsert_maps_chunk_to_point_with_payload():
     client = FakeQdrantClient()
     store = QdrantVectorStore(client=client, collection="docs")
     chunk = Chunk(
@@ -49,7 +49,7 @@ def test_upsert_maps_chunk_to_point_with_payload():
         position={"index": 0, "start": 0, "end": 5},
     )
 
-    store.upsert([chunk])
+    await store.upsert([chunk])
 
     point = client.upserted["points"][0]
     assert client.upserted["collection"] == "docs"
@@ -64,16 +64,16 @@ def test_upsert_maps_chunk_to_point_with_payload():
     }
 
 
-def test_delete_maps_ids():
+async def test_delete_maps_ids():
     client = FakeQdrantClient()
     store = QdrantVectorStore(client=client, collection="docs")
 
-    store.delete(["c1"])
+    await store.delete(["c1"])
 
     assert client.deleted["selector"] == [_expected_point_id("c1")]
 
 
-def test_search_reconstructs_retrieved_chunks():
+async def test_search_reconstructs_retrieved_chunks():
     payload = {
         "chunk_id": "c1",
         "document_id": "d1",
@@ -85,7 +85,7 @@ def test_search_reconstructs_retrieved_chunks():
     client = FakeQdrantClient(hits=[FakeHit(payload, score=0.87)])
     store = QdrantVectorStore(client=client, collection="docs")
 
-    results = store.search([0.1, 0.2], top_k=3)
+    results = await store.search([0.1, 0.2], top_k=3)
 
     assert client.search_args["limit"] == 3
     assert results[0].score == 0.87

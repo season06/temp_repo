@@ -10,7 +10,7 @@ def _point_id(chunk_id):
 
 
 class QdrantVectorStore:
-    """以 qdrant-client 儲存 / 查詢向量。
+    """以 qdrant-client(AsyncQdrantClient)非同步儲存 / 查詢向量。
 
     chunk.id 以 uuid5 映成 point id,原始欄位存於 payload,search 時還原為 Chunk。
     collection 的建立與向量維度設定由呼叫端先行處理。
@@ -20,7 +20,7 @@ class QdrantVectorStore:
         self._client = client
         self._collection = collection
 
-    def upsert(self, chunks):
+    async def upsert(self, chunks):
         points = [
             qmodels.PointStruct(
                 id=_point_id(chunk.id),
@@ -36,16 +36,16 @@ class QdrantVectorStore:
             )
             for chunk in chunks
         ]
-        self._client.upsert(collection_name=self._collection, points=points)
+        await self._client.upsert(collection_name=self._collection, points=points)
 
-    def delete(self, chunk_ids):
-        self._client.delete(
+    async def delete(self, chunk_ids):
+        await self._client.delete(
             collection_name=self._collection,
             points_selector=[_point_id(cid) for cid in chunk_ids],
         )
 
-    def search(self, embedding, top_k):
-        hits = self._client.search(
+    async def search(self, embedding, top_k):
+        hits = await self._client.search(
             collection_name=self._collection,
             query_vector=embedding,
             limit=top_k,
