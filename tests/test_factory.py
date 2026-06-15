@@ -31,6 +31,21 @@ indexing:
     type: qdrant
     url: http://localhost:6333
     collection: docs
+query:
+  retriever:
+    type: dense
+    top_k: 30
+  fusion:
+    type: rrf
+    k: 40
+  reranker:
+    type: qwen
+    base_url: https://api/v1
+    api_key: ${ENV:QWEN_KEY}
+    model: qwen-reranker
+  context:
+    max_chars: 1234
+  top_k: 5
 """
 
 
@@ -55,3 +70,24 @@ def test_build_indexing_pipeline_from_config(tmp_path, monkeypatch):
 def test_unknown_loader_type_raises():
     with pytest.raises(ValueError):
         _build_loader(LoaderConfig(type="ftp"))
+
+
+def test_build_query_pipeline_from_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("QWEN_KEY", "secret-123")
+    cfg = tmp_path / "rag.yaml"
+    cfg.write_text(textwrap.dedent(_YAML), encoding="utf-8")
+    config = load_config(str(cfg))
+
+    from rag_adapter.factory import build_query_pipeline
+    from rag_adapter.retrievers.dense_retriever import DenseRetriever
+    from rag_adapter.fusion.rrf_fusion import RRFFusion
+    from rag_adapter.rerankers.qwen_reranker import QwenReranker
+    from rag_adapter.context.context_builder import DefaultContextBuilder
+
+    pipeline = build_query_pipeline(config)
+
+    assert isinstance(pipeline._retrievers[0], DenseRetriever)
+    assert isinstance(pipeline._fusion, RRFFusion)
+    assert isinstance(pipeline._reranker, QwenReranker)
+    assert isinstance(pipeline._context_builder, DefaultContextBuilder)
+    assert pipeline._top_k == 5

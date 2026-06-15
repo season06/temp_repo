@@ -25,6 +25,21 @@ indexing:
     type: qdrant
     url: http://localhost:6333
     collection: docs
+query:
+  retriever:
+    type: dense
+    top_k: 30
+  fusion:
+    type: rrf
+    k: 40
+  reranker:
+    type: qwen
+    base_url: https://api/v1
+    api_key: ${ENV:QWEN_KEY}
+    model: qwen-reranker
+  context:
+    max_chars: 1234
+  top_k: 5
 """
 
 
@@ -44,6 +59,11 @@ def test_load_config_returns_typed_config_with_env_interpolation(tmp_path, monke
     assert config.indexing.chunker.chunk_size == 500
     assert config.indexing.vector_store.collection == "docs"
     assert config.indexing.loader.loader_name == "html"
+    assert config.query.retriever.top_k == 30
+    assert config.query.fusion.k == 40
+    assert config.query.reranker.api_key == "secret-123"
+    assert config.query.context.max_chars == 1234
+    assert config.query.top_k == 5
 
 
 def test_defaults_applied_when_sections_missing():

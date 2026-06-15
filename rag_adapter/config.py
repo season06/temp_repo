@@ -68,8 +68,55 @@ class IndexingConfig:
 
 
 @dataclass(frozen=True)
+class RetrieverConfig:
+    type: str = "dense"
+    top_k: int = 20
+
+    def __post_init__(self) -> None:
+        if self.top_k <= 0:
+            raise ValueError("top_k must be greater than 0")
+
+
+@dataclass(frozen=True)
+class FusionConfig:
+    type: str = "rrf"
+    k: int = 60
+
+
+@dataclass(frozen=True)
+class RerankerConfig:
+    type: str = "qwen"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = "qwen-reranker"
+
+
+@dataclass(frozen=True)
+class ContextConfig:
+    max_chars: int = 6000
+
+    def __post_init__(self) -> None:
+        if self.max_chars <= 0:
+            raise ValueError("max_chars must be greater than 0")
+
+
+@dataclass(frozen=True)
+class QueryConfig:
+    retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
+    fusion: FusionConfig = field(default_factory=FusionConfig)
+    reranker: RerankerConfig = field(default_factory=RerankerConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
+    top_k: int = 8
+
+    def __post_init__(self) -> None:
+        if self.top_k <= 0:
+            raise ValueError("top_k must be greater than 0")
+
+
+@dataclass(frozen=True)
 class RagConfig:
     indexing: IndexingConfig = field(default_factory=IndexingConfig)
+    query: QueryConfig = field(default_factory=QueryConfig)
 
 
 _ENV_PATTERN = re.compile(r"\$\{ENV:([^}]+)\}")
@@ -95,9 +142,22 @@ def _indexing_from_dict(raw: dict) -> IndexingConfig:
     )
 
 
+def _query_from_dict(raw: dict) -> QueryConfig:
+    return QueryConfig(
+        retriever=RetrieverConfig(**raw.get("retriever", {})),
+        fusion=FusionConfig(**raw.get("fusion", {})),
+        reranker=RerankerConfig(**raw.get("reranker", {})),
+        context=ContextConfig(**raw.get("context", {})),
+        top_k=raw.get("top_k", 8),
+    )
+
+
 def from_dict(raw: dict) -> RagConfig:
     """把已插值的 dict 轉成 typed RagConfig。"""
-    return RagConfig(indexing=_indexing_from_dict(raw.get("indexing", {})))
+    return RagConfig(
+        indexing=_indexing_from_dict(raw.get("indexing", {})),
+        query=_query_from_dict(raw.get("query", {})),
+    )
 
 
 def load_config(path: str) -> RagConfig:
