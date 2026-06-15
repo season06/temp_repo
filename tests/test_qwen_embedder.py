@@ -18,13 +18,13 @@ class FakeHttpClient:
         self._batches = list(batches)
         self.calls = []
 
-    def post(self, url, headers=None, json=None):
+    async def post(self, url, headers=None, json=None):
         self.calls.append({"url": url, "headers": headers, "json": json})
         vectors = self._batches.pop(0)
         return FakeResponse({"data": [{"embedding": v} for v in vectors]})
 
 
-def test_embed_fills_embeddings_and_batches():
+async def test_embed_fills_embeddings_and_batches():
     client = FakeHttpClient(batches=[[[1.0], [2.0]], [[3.0]]])
     embedder = QwenEmbedder(
         base_url="https://api/v1/",
@@ -39,7 +39,7 @@ def test_embed_fills_embeddings_and_batches():
         Chunk(id="c3", document_id="d", text="c"),
     ]
 
-    out = embedder.embed(chunks)
+    out = await embedder.embed(chunks)
 
     assert [c.embedding for c in out] == [[1.0], [2.0], [3.0]]
     assert len(client.calls) == 2
@@ -48,7 +48,7 @@ def test_embed_fills_embeddings_and_batches():
     assert client.calls[0]["json"] == {"model": "text-embedding-v3", "input": ["a", "b"]}
 
 
-def test_embed_query_returns_single_vector():
+async def test_embed_query_returns_single_vector():
     client = FakeHttpClient(batches=[[[9.0]]])
     embedder = QwenEmbedder(
         base_url="https://api/v1",
@@ -57,4 +57,4 @@ def test_embed_query_returns_single_vector():
         client=client,
     )
 
-    assert embedder.embed_query("hello") == [9.0]
+    assert await embedder.embed_query("hello") == [9.0]
