@@ -6,6 +6,7 @@ from rag_adapter.evaluation.metrics import (
     reciprocal_rank,
     ndcg_at_k,
 )
+from rag_adapter.evaluation.ragas_eval import RagasCase, collect_samples, evaluate_with_ragas
 
 __all__ = [
     "EvalCase",
@@ -16,4 +17,7 @@ __all__ = [
     "precision_at_k",
     "reciprocal_rank",
     "ndcg_at_k",
+    "RagasCase",
+    "collect_samples",
+    "evaluate_with_ragas",
 ]

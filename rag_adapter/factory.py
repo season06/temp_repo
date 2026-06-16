@@ -130,3 +130,27 @@ def build_query_pipeline(config):
         prompt_builder=prompt_builder,
         generator=generator,
     )
+
+
+def build_ragas_judge(config):
+    """以 config.evaluation 建立 RAGAS 相容的 judge LLM 與 embeddings(重用 Qwen,OpenAI 相容)。
+
+    版本適配點:依安裝的 ragas / langchain-openai 版本調整匯入。
+    """
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    from ragas.llms import LangchainLLMWrapper
+    from ragas.embeddings import LangchainEmbeddingsWrapper
+
+    evaluation = config.evaluation
+    chat = ChatOpenAI(
+        base_url=evaluation.judge_base_url,
+        api_key=evaluation.judge_api_key,
+        model=evaluation.judge_model,
+        temperature=0,
+    )
+    embeddings = OpenAIEmbeddings(
+        base_url=evaluation.judge_base_url,
+        api_key=evaluation.judge_api_key,
+        model=evaluation.embedding_model,
+    )
+    return LangchainLLMWrapper(chat), LangchainEmbeddingsWrapper(embeddings)
