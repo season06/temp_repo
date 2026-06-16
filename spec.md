@@ -21,17 +21,19 @@
 
 ### Indexing Pipeline
 
-Data Loader (current supports: html, tkms, json, xml)
-Parser
-Chunker
+Data Loader (current supports: file, url, tkms[內部 wiki，以 HTML 處理])
+Parser (current supports: html, json, xml)
+Chunker (current supports: character)
 Embedder (current supports: Qwen Model)
-Vector Store (current supports: Qrant)
+Vector Store (current supports: Qdrant)
 
 ### Query Pipeline
-- Retirever (cosine_similarity, BM25)
+- Retriever (cosine_similarity, BM25)
+- Fusion (RRF)
 - Reranker (current supports: Qwen Model)
 - Context Builder
-- Evaluation
+- Prompt Builder & Generator (current supports: Qwen Model，支援 streaming)
+- Evaluation (規劃中)
 
 ---
 

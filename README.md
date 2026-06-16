@@ -2,7 +2,7 @@
 
 RAG Adapter SDK 是提供多專案場景設計的通用系統開發工具包。
 旨在協助不同業務團隊依據專案需求，靈活且彈性地替換底層 Model、Vector DB、Data Source 與 Retrieval Strategy。
-將複雜的 RAG 流程抽象化為可插拔的模組化元件，大幅提升 RAG 系統的開發效率與擴充性 —— 涵蓋 Data Ingestion、Parsing、Chunking、Embedding、Indexing、Retrieval、Reranking 與 Context Prompting。
+將複雜的 RAG 流程抽象化為可插拔的模組化元件，大幅提升 RAG 系統的開發效率與擴充性 —— 涵蓋 Data Ingestion、Parsing、Chunking、Embedding、Indexing、Retrieval、Fusion、Reranking、Context Prompting 與 Answer Generation。
 
 ## Current Supports
 
@@ -13,8 +13,14 @@ RAG Adapter SDK 是提供多專案場景設計的通用系統開發工具包。
 | Chunker | `character` (重疊滑動視窗) |
 | Embedder | `qwen` (OpenAI 相容 API) |
 | Vector Store | `qdrant` |
+| Retriever | `dense`(cosine)、`bm25`(in-memory) |
+| Fusion | `rrf` |
+| Reranker | `qwen` (rerank API) |
+| Context Builder | `default`(字元預算 + 去重 + `[n]` 引用) |
+| Prompt Builder | `template` |
+| Generator | `qwen` (chat API,支援 streaming) |
 
-> Query 側(Retriever / Reranker / ContextBuilder / Generator)的介面與測試替身已就緒,真實 provider 規劃於後續階段(見 `docs/superpowers/plans/`)。
+> Indexing 與 Query(檢索 → 融合 → 重排 → 組裝 context → 生成)主鏈皆已實作。Observability(Langfuse)與 Evaluation(retrieval 指標)規劃於後續階段(見 `docs/superpowers/plans/`)。
 
 ---
 
@@ -89,6 +95,23 @@ config = load_config("examples/rag.yaml")
 pipeline = build_indexing_pipeline(config)   # 需 Qdrant server + Qwen API
 ```
 
+### Query(檢索 + 可選生成)
+
+```python
+import asyncio
+from rag_adapter.config import load_config
+from rag_adapter.factory import build_query_pipeline
+
+pipeline = build_query_pipeline(load_config("examples/rag.yaml"))
+
+# 檢索 + 組裝 context(回傳 context 與引用,不需 generator)
+built = asyncio.run(pipeline.retrieve_context("How do I onboard?"))
+print(built["context"], built["citations"])
+```
+
+要生成答案,於 config 加上 `query.generation`(`enabled: true` + `generator` 設定),即可用
+`await pipeline.answer(query)`(一次性)或 `pipeline.stream(query)`(async generator,逐 token)。
+
 ---
 
 ## (for Developer)
@@ -148,7 +171,7 @@ pipeline 在 I/O 步驟 `await`, CPU 步驟直接呼叫:
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 目前 35 passed
+pytest -q          # 目前 57 passed
 ```
 
 - 採 `pytest-asyncio`,`pyproject.toml` 設 `asyncio_mode = "auto"`,故 `async def test_...` 不需裝飾子。
@@ -164,7 +187,8 @@ rag_adapter/
   config.py            # YAML → typed RagConfig(Pattern 2 + 4,只做 config)
   factory.py           # config → 組裝 pipeline(Pattern 4)
   pipeline/            # IndexingPipeline / QueryPipeline(Pattern 5)
-  loaders/ parsers/ chunkers/ embedders/ vectorstores/   # provider 實作(Pattern 3)
+  loaders/ parsers/ chunkers/ embedders/ vectorstores/         # indexing providers(Pattern 3)
+  retrievers/ fusion/ rerankers/ context/ prompts/ generators/  # query + generation providers(Pattern 3)
   testing/mocks.py     # 測試替身
 examples/              # quick-start 範例 + rag.yaml
 tests/                 # 對應各層的測試
