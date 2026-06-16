@@ -125,3 +125,22 @@ async def test_answer_without_generator_raises():
 
     with pytest.raises(RuntimeError):
         await pipeline.answer("aaaa")
+
+
+async def test_query_pipeline_retrieve_returns_reranked_chunks():
+    store, chunks = _build_store()
+    await store.upsert(chunks)
+    embedder = EchoEmbedder()
+    pipeline = QueryPipeline(
+        retrievers=[VectorRetriever(embedder, store)],
+        fusion=PassthroughFusion(),
+        reranker=NoopReranker(),
+        context_builder=SimpleContextBuilder(),
+        top_k=2,
+    )
+
+    results = await pipeline.retrieve("aaaa")
+
+    ids = [rc.chunk.id for rc in results]
+    assert "c2" in ids
+    assert all(hasattr(rc, "score") for rc in results)

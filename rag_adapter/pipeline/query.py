@@ -36,6 +36,10 @@ class QueryPipeline:
         reranked = await self._reranker.rerank(query, fused, self._top_k)
         return query, reranked
 
+    async def retrieve(self, query):
+        _, reranked = await self._retrieve(query)
+        return reranked
+
     async def retrieve_context(self, query):
         prepared_query, reranked = await self._retrieve(query)
         return self._context_builder.build(prepared_query, reranked)
