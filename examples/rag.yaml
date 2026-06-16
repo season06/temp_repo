@@ -1,6 +1,6 @@
-# RAG Adapter — indexing 配置範例(config-driven)
-# 用法見 examples/indexing_quickstart.py 檔尾的 config 驅動段落。
-# secrets 以 ${ENV:VAR} 從環境變數插值。
+# RAG Adapter — config-driven 配置範例(indexing + query)
+# 用法見 examples/indexing_quickstart.py 與 examples/query_quickstart.py 檔尾的 config 段落。
+# secrets 以 ${ENV:VAR} 從環境變數插值(載入前需先設好對應環境變數)。
 indexing:
   loader:
     type: file          # file | url | tkms
@@ -21,3 +21,30 @@ indexing:
     type: qdrant
     url: http://localhost:6333
     collection: documents
+
+query:
+  retriever:
+    type: dense          # dense(cosine via vector store)| bm25
+    top_k: 20
+  fusion:
+    type: rrf
+    k: 60
+  reranker:
+    type: qwen
+    base_url: ${ENV:QWEN_BASE_URL}   # rerank 端點
+    api_key: ${ENV:QWEN_API_KEY}
+    model: qwen-reranker
+  context:
+    max_chars: 6000
+  top_k: 8
+  generation:
+    enabled: false       # 設 true 才可用 pipeline.answer / stream
+    prompt_builder:
+      type: template
+    generator:
+      type: qwen
+      base_url: ${ENV:QWEN_BASE_URL}   # chat completions 端點
+      api_key: ${ENV:QWEN_API_KEY}
+      model: qwen-max
+      temperature: 0.0
+      system_prompt: "你是一個嚴謹的助理,只根據提供的資料作答。"
