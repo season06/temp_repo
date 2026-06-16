@@ -39,6 +39,17 @@ query:
     model: qwen-reranker
   context:
     max_chars: 1234
+  generation:
+    enabled: true
+    prompt_builder:
+      type: template
+    generator:
+      type: qwen
+      base_url: https://api/v1
+      api_key: ${ENV:QWEN_KEY}
+      model: qwen-max
+      temperature: 0.2
+      system_prompt: be helpful
   top_k: 5
 """
 
@@ -64,6 +75,10 @@ def test_load_config_returns_typed_config_with_env_interpolation(tmp_path, monke
     assert config.query.reranker.api_key == "secret-123"
     assert config.query.context.max_chars == 1234
     assert config.query.top_k == 5
+    assert config.query.generation.enabled is True
+    assert config.query.generation.generator.api_key == "secret-123"
+    assert config.query.generation.generator.temperature == 0.2
+    assert config.query.generation.prompt_builder.type == "template"
 
 
 def test_defaults_applied_when_sections_missing():

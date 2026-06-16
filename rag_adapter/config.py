@@ -101,11 +101,35 @@ class ContextConfig:
 
 
 @dataclass(frozen=True)
+class PromptBuilderConfig:
+    type: str = "template"
+    template: str | None = None
+
+
+@dataclass(frozen=True)
+class GeneratorConfig:
+    type: str = "qwen"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = "qwen-max"
+    temperature: float = 0.0
+    system_prompt: str = ""
+
+
+@dataclass(frozen=True)
+class GenerationConfig:
+    enabled: bool = False
+    prompt_builder: PromptBuilderConfig = field(default_factory=PromptBuilderConfig)
+    generator: GeneratorConfig = field(default_factory=GeneratorConfig)
+
+
+@dataclass(frozen=True)
 class QueryConfig:
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    generation: GenerationConfig = field(default_factory=GenerationConfig)
     top_k: int = 8
 
     def __post_init__(self) -> None:
@@ -142,12 +166,21 @@ def _indexing_from_dict(raw: dict) -> IndexingConfig:
     )
 
 
+def _generation_from_dict(raw: dict) -> GenerationConfig:
+    return GenerationConfig(
+        enabled=raw.get("enabled", False),
+        prompt_builder=PromptBuilderConfig(**raw.get("prompt_builder", {})),
+        generator=GeneratorConfig(**raw.get("generator", {})),
+    )
+
+
 def _query_from_dict(raw: dict) -> QueryConfig:
     return QueryConfig(
         retriever=RetrieverConfig(**raw.get("retriever", {})),
         fusion=FusionConfig(**raw.get("fusion", {})),
         reranker=RerankerConfig(**raw.get("reranker", {})),
         context=ContextConfig(**raw.get("context", {})),
+        generation=_generation_from_dict(raw.get("generation", {})),
         top_k=raw.get("top_k", 8),
     )
 

@@ -45,6 +45,17 @@ query:
     model: qwen-reranker
   context:
     max_chars: 1234
+  generation:
+    enabled: true
+    prompt_builder:
+      type: template
+    generator:
+      type: qwen
+      base_url: https://api/v1
+      api_key: ${ENV:QWEN_KEY}
+      model: qwen-max
+      temperature: 0.2
+      system_prompt: be helpful
   top_k: 5
 """
 
@@ -91,3 +102,19 @@ def test_build_query_pipeline_from_config(tmp_path, monkeypatch):
     assert isinstance(pipeline._reranker, QwenReranker)
     assert isinstance(pipeline._context_builder, DefaultContextBuilder)
     assert pipeline._top_k == 5
+
+
+def test_build_query_pipeline_with_generation(tmp_path, monkeypatch):
+    monkeypatch.setenv("QWEN_KEY", "secret-123")
+    cfg = tmp_path / "rag.yaml"
+    cfg.write_text(textwrap.dedent(_YAML), encoding="utf-8")
+    config = load_config(str(cfg))
+
+    from rag_adapter.factory import build_query_pipeline
+    from rag_adapter.prompts.template_prompt_builder import TemplatePromptBuilder
+    from rag_adapter.generators.qwen_generator import QwenGenerator
+
+    pipeline = build_query_pipeline(config)
+
+    assert isinstance(pipeline._prompt_builder, TemplatePromptBuilder)
+    assert isinstance(pipeline._generator, QwenGenerator)

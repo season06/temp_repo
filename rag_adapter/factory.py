@@ -9,6 +9,8 @@ from rag_adapter.retrievers.dense_retriever import DenseRetriever
 from rag_adapter.fusion.rrf_fusion import RRFFusion
 from rag_adapter.rerankers.qwen_reranker import QwenReranker
 from rag_adapter.context.context_builder import DefaultContextBuilder
+from rag_adapter.prompts.template_prompt_builder import TemplatePromptBuilder
+from rag_adapter.generators.qwen_generator import QwenGenerator
 from rag_adapter.pipeline.indexing import IndexingPipeline
 from rag_adapter.pipeline.query import QueryPipeline
 
@@ -91,18 +93,40 @@ def _build_reranker(config):
     raise ValueError(f"unknown reranker type: {config.type}")
 
 
-def build_query_pipeline(config):
-    """依 RagConfig 組裝 QueryPipeline(到 retrieve_context 為止;生成屬 P4)。
+def _build_prompt_builder(config):
+    if config.type == "template":
+        return TemplatePromptBuilder(template=config.template)
+    raise ValueError(f"unknown prompt builder type: {config.type}")
 
-    dense retriever 與 indexing 共用 embedder / vector store 設定。
+
+def _build_generator(config):
+    if config.type == "qwen":
+        return QwenGenerator(
+            base_url=config.base_url,
+            api_key=config.api_key,
+            model=config.model,
+            temperature=config.temperature,
+            system_prompt=config.system_prompt,
+        )
+    raise ValueError(f"unknown generator type: {config.type}")
+
+
+def build_query_pipeline(config):
+    """依 RagConfig 組裝 QueryPipeline。generation.enabled 時一併組入 prompt_builder + generator
+    (可用 answer/stream);否則只到 retrieve_context。dense retriever 與 indexing 共用 embedder / store。
     """
     embedder = _build_embedder(config.indexing.embedder)
     vector_store = _build_vector_store(config.indexing.vector_store)
     query = config.query
+    generation = query.generation
+    prompt_builder = _build_prompt_builder(generation.prompt_builder) if generation.enabled else None
+    generator = _build_generator(generation.generator) if generation.enabled else None
     return QueryPipeline(
         retrievers=[_build_retriever(query.retriever, embedder, vector_store)],
         fusion=_build_fusion(query.fusion),
         reranker=_build_reranker(query.reranker),
         context_builder=DefaultContextBuilder(max_chars=query.context.max_chars),
         top_k=query.top_k,
+        prompt_builder=prompt_builder,
+        generator=generator,
     )
