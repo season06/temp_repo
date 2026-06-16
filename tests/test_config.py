@@ -51,6 +51,13 @@ query:
       temperature: 0.2
       system_prompt: be helpful
   top_k: 5
+evaluation:
+  enabled: true
+  metrics: [faithfulness, context_recall]
+  judge_base_url: https://api/v1
+  judge_api_key: ${ENV:QWEN_KEY}
+  judge_model: qwen-max
+  embedding_model: qwen-embedding
 """
 
 
@@ -79,6 +86,10 @@ def test_load_config_returns_typed_config_with_env_interpolation(tmp_path, monke
     assert config.query.generation.generator.api_key == "secret-123"
     assert config.query.generation.generator.temperature == 0.2
     assert config.query.generation.prompt_builder.type == "template"
+    assert config.evaluation.enabled is True
+    assert config.evaluation.metrics == ["faithfulness", "context_recall"]
+    assert config.evaluation.judge_api_key == "secret-123"
+    assert config.evaluation.judge_model == "qwen-max"
 
 
 def test_defaults_applied_when_sections_missing():

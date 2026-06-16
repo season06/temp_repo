@@ -138,9 +138,22 @@ class QueryConfig:
 
 
 @dataclass(frozen=True)
+class EvaluationConfig:
+    enabled: bool = False
+    metrics: list = field(default_factory=lambda: [
+        "faithfulness", "answer_relevancy", "context_precision", "context_recall",
+    ])
+    judge_base_url: str = ""
+    judge_api_key: str = ""
+    judge_model: str = "qwen-max"
+    embedding_model: str = "qwen-embedding"
+
+
+@dataclass(frozen=True)
 class RagConfig:
     indexing: IndexingConfig = field(default_factory=IndexingConfig)
     query: QueryConfig = field(default_factory=QueryConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
 
 _ENV_PATTERN = re.compile(r"\$\{ENV:([^}]+)\}")
@@ -185,11 +198,16 @@ def _query_from_dict(raw: dict) -> QueryConfig:
     )
 
 
+def _evaluation_from_dict(raw: dict) -> EvaluationConfig:
+    return EvaluationConfig(**raw)
+
+
 def from_dict(raw: dict) -> RagConfig:
     """把已插值的 dict 轉成 typed RagConfig。"""
     return RagConfig(
         indexing=_indexing_from_dict(raw.get("indexing", {})),
         query=_query_from_dict(raw.get("query", {})),
+        evaluation=_evaluation_from_dict(raw.get("evaluation", {})),
     )
 
 
