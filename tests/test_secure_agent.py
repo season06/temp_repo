@@ -36,6 +36,7 @@ def test_invoke_delegates(monkeypatch):
     "with_config", "bind", "with_retry", "with_fallbacks", "with_types",
     "with_listeners", "pipe",
     "get_graph", "nodes", "builder", "steps", "channels",
+    "_agent",  # name-mangled inner ref: casual ._agent discovery is blocked too
 ])
 def test_blocked_surface_raises_security_violation(monkeypatch, name):
     agent = _agent(monkeypatch)

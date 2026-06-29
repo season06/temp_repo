@@ -17,4 +17,5 @@
 ## P3 必須處理(來自 P2 最終整支審查)
 
 - **factory.py 不在編譯範圍內 → 完整性檢查必涵蓋 factory wiring(R1,重要)**:P3 僅編譯 `_secure/`,但「不可關閉」保證依賴 `factory.build_agent` 永遠注入 `build_security_middleware`。`factory.py` 維持純 Python,故 rebind `factory.build_security_middleware` / `factory._build_deep_agent` 即可在「編譯後」仍剝除外殼。P3 的完整性自檢(設計規格 §C)必須在 build 時驗證「實際掛上的 middleware 與 prompt 夾心為框架原生」,**或**把 factory 的安全 wiring 移進被編譯的套件。此屬「validator monkeypatch」同類,但延伸到 factory 接縫。
-- **`.stream()` / `.astream()` 輸出驗證繞過(C1)**:見 P2 後續決策;若 P2 採「停用 streaming / 包裝」則 P3 沿用,若延後則 P3 需提供「驗證過的串流」設計(緩衝後再吐 或 chunk 級驗證)。
+- **`.stream()` / `.astream()` 輸出驗證繞過(C1)**:P2 已用 `SecureAgent`(allow-list 包裝,只開放 invoke/ainvoke/batch/abatch,封鎖所有串流與 with_config/pipe/bind 等組合方法)擋住「意外」繞過。P3 需提供「驗證過的串流」設計(緩衝後再吐 或 chunk 級驗證)。
+- **SecureAgent 的 in-process 固有限制(書面接受,model A)**:純 Python 包裝無法完全隱藏內層 graph —— 刻意者仍可經 `agent.__dict__['_SecureAgent__agent']` / `vars(agent)` / `gc.get_referents` 取得原始 runnable 直接 `.astream(...)` 繞過驗證。已用 name-mangling 擋住 casual `._agent` 探測;完全擋住刻意繞過需 P3 編譯 `_secure/`(把包裝/wiring 內部化)且最終需 server 端(model B)。此為與威脅模型一致的已接受取捨(主要防意外、次要提高刻意成本)。
