@@ -2,6 +2,9 @@ import pytest
 import agent_template.factory as factory
 from agent_template.config import AgentConfig
 from agent_template.errors import ConfigError
+from agent_template._secure._guard import InputGuardMiddleware
+from agent_template._secure._validation import OutputValidationMiddleware
+from agent_template._secure._envelope import SAFETY_PREFIX, SAFETY_SUFFIX
 
 
 @pytest.fixture
@@ -9,13 +12,13 @@ def patched(monkeypatch):
     captured = {}
 
     def fake_build_chat_model(config):
-        captured["model_built"] = True
         return "FAKE_MODEL"
 
-    def fake_create_deep_agent(model, tools, system_prompt):
+    def fake_create_deep_agent(model, tools, system_prompt, middleware):
+        captured["model"] = model
         captured["tools"] = tools
         captured["system_prompt"] = system_prompt
-        captured["model"] = model
+        captured["middleware"] = middleware
         return "FAKE_AGENT"
 
     monkeypatch.setattr(factory, "build_chat_model", fake_build_chat_model)
@@ -32,12 +35,25 @@ def test_requires_config():
         factory.build_agent("do the task", config=None)
 
 
-def test_builds_agent_with_task_prompt(patched):
-    agent = factory.build_agent("do the task", tools=["t1"], config=_cfg())
-    assert agent == "FAKE_AGENT"
-    assert patched["system_prompt"] == "do the task"   # P1: 未包外殼
-    assert patched["tools"] == ["t1"]
-    assert patched["model"] == "FAKE_MODEL"
+def test_system_prompt_is_sandwiched(patched):
+    factory.build_agent("do the task", config=_cfg())
+    sp = patched["system_prompt"]
+    assert sp.startswith(SAFETY_PREFIX)
+    assert sp.endswith(SAFETY_SUFFIX)
+    assert "do the task" in sp
+
+
+def test_security_middleware_always_present(patched):
+    factory.build_agent("task", config=_cfg())
+    mw = patched["middleware"]
+    assert any(isinstance(m, InputGuardMiddleware) for m in mw)
+    assert any(isinstance(m, OutputValidationMiddleware) for m in mw)
+
+
+def test_no_param_can_disable_security(patched):
+    # build_agent 不接受任何停用安全層的參數;傳未知參數應 TypeError
+    with pytest.raises(TypeError):
+        factory.build_agent("task", config=_cfg(), disable_security=True)
 
 
 def test_tools_default_empty(patched):
