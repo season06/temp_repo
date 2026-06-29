@@ -43,3 +43,19 @@ def test_builds_agent_with_task_prompt(patched):
 def test_tools_default_empty(patched):
     factory.build_agent("task", config=_cfg())
     assert patched["tools"] == []
+
+
+def test_audit_called_when_enabled(monkeypatch, patched):
+    calls = []
+    monkeypatch.setattr(factory, "audit", lambda event: calls.append(event))
+    factory.build_agent("task", config=_cfg())
+    assert len(calls) == 1
+    assert calls[0]["action"] == "build_agent"
+
+
+def test_audit_suppressed_when_disabled(monkeypatch, patched):
+    calls = []
+    monkeypatch.setattr(factory, "audit", lambda event: calls.append(event))
+    cfg = AgentConfig(model="qwen-max", base_url="https://x/v1", api_key="k", enable_audit_log=False)
+    factory.build_agent("task", config=cfg)
+    assert calls == []
