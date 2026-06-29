@@ -16,8 +16,11 @@ class InputGuardMiddleware(AgentMiddleware):
     """強制輸入防護:進入 agent 前偵測 prompt injection,違規即擋下。"""
 
     def before_agent(self, state, runtime):
-        text = _latest_human_text(state.get("messages", []))
-        violations = detect_prompt_injection(text)
-        if violations:
-            raise SecurityViolation(f"input blocked: {violations}")
+        # 掃描所有 HumanMessage(含載入的歷史/多訊息批次),非僅最後一則。
+        for msg in state.get("messages", []):
+            if isinstance(msg, HumanMessage):
+                text = msg.content if isinstance(msg.content, str) else str(msg.content)
+                violations = detect_prompt_injection(text)
+                if violations:
+                    raise SecurityViolation(f"input blocked: {violations}")
         return None
