@@ -6,3 +6,9 @@ __pycache__/
 .superpowers/
 build/
 dist/
+
+# cython build artifacts
+.pyhdr/
+*.so
+*.c
+*.cpp
