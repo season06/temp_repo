@@ -18,15 +18,16 @@ _INJECTION_PATTERNS = [
     r"(?:translate|repeat|summari[sz]e|rephrase|print|output|echo)\s+"
     r"(?:the\s+|all\s+|everything\s+)?(?:text|words|content|message|prompt|instructions?|everything)\s+"
     r"(?:above|before|preceding)",
-    # 系統提示詞抽取(名詞固定為 prompt)
+    # 系統提示詞抽取:限 "your prompt" / "system prompt"(不抓裸 "the prompt",降低範本類誤判)
     r"(?:reveal|show|print|repeat|leak|tell\s+me|give\s+me|what(?:'?s| is))\b.{0,30}?"
-    r"(?:your|the)\s+(?:system\s+)?prompt",
+    r"(?:your\s+(?:system\s+)?prompt|the\s+system\s+prompt)",
     # 系統指令抽取(instructions/rules 只有在前面有 system 才算)
     r"(?:reveal|show|print|repeat|leak)\b.{0,30}?(?:your|the)\s+system\s+"
     r"(?:instructions?|directives?|rules?)",
-    # 抽取「你的(your)指令/規則/提示」:possessive 高訊號,刻意不抓 "the instructions"
-    r"(?:reveal|show|print|repeat|leak|tell\s+me|give\s+me)\b.{0,30}?"
-    r"your\s+(?:system\s+)?(?:instructions?|directives?|rules?|guidelines?|prompt)",
+    # 抽取「你的(your)指令/規則」:限抽取動詞(reveal/repeat/leak/print)以降低誤判
+    # (放掉 show/give/tell me:"show me your guidelines for X" 屬合法請求)
+    r"(?:reveal|repeat|leak|print)\b.{0,30}?"
+    r"your\s+(?:system\s+)?(?:instructions?|directives?|rules?|guidelines?)",
     # 人格接管 "you are now ..."(僅越獄/解除限制語彙)
     r"you\s+are\s+now\s+(?:a\s+|an\s+|in\s+)?(?:dan\b|jailbroken|unrestricted|uncensored|unfiltered|"
     r"freed?\s+from\s+(?:all\s+)?(?:your\s+)?(?:restrictions|rules|guidelines|constraints)|"
@@ -52,8 +53,10 @@ _INJECTION_RE = [re.compile(p, re.IGNORECASE) for p in _INJECTION_PATTERNS]
 # PII / secrets detection
 # ---------------------------------------------------------------------------
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-# 信用卡:先抓 13-19 碼候選,再用 Luhn 過濾(濾掉 ISBN / IMEI / 時間戳等誤判)
-_CC_CANDIDATE_RE = re.compile(r"\b\d(?:[ -]?\d){12,18}\b")
+# 信用卡:先抓 13-19 碼候選(限 ASCII 數字,配合 _luhn_ok 的 ord 運算),再用 Luhn 過濾
+# (濾掉 ISBN-13 / 時間戳等誤判;15 碼 IMEI 為 Luhn-valid 會殘留誤判,v1 接受,
+#  見 docs/superpowers/specs/p2-redteam-deferred-to-p3.md)
+_CC_CANDIDATE_RE = re.compile(r"\b[0-9](?:[ -]?[0-9]){12,18}\b")
 # 美國 SSN:僅比對有連字號的 ddd-dd-dddd(排除無效區段;不抓裸 9 碼以降低誤判)
 _SSN_RE = re.compile(r"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b")
 
@@ -101,6 +104,8 @@ def detect_prompt_injection(text) -> list:
 def detect_pii(text) -> list:
     if not text:
         return []
+    # 輸出側同樣做正規化:擋住 fullwidth/zero-width 混淆的卡號/機密/sentinel 外洩。
+    text = _normalize(text)
     hits = []
     if _EMAIL_RE.search(text):
         hits.append("pii: email")
@@ -121,6 +126,7 @@ def detect_system_prompt_leak(text) -> list:
     # 僅比對機器插入的字面 sentinel,誤判趨近於零(刻意不做語意/改寫比對)。
     if not text:
         return []
+    text = _normalize(text)  # 擋住以 zero-width 等混淆 sentinel 規避偵測
     hits = []
     if BEGIN_MARKER in text:
         hits.append("system_prompt_leak: BEGIN_MARKER")
