@@ -5,6 +5,7 @@ from .errors import ConfigError
 from .observability import audit
 from .providers import build_chat_model
 from ._secure import build_security_middleware, wrap_system_prompt
+from ._secure._agent import SecureAgent
 
 
 def _build_deep_agent(model, tools: list, system_prompt, middleware: list):
@@ -26,4 +27,5 @@ def build_agent(task_prompt, tools: list = None, config: AgentConfig = None,
     agent = _build_deep_agent(model, tools, system_prompt, middleware)
     if config.enable_audit_log:
         audit({"action": "build_agent", "tools": len(tools)})
-    return agent
+    # 包一層 SecureAgent:停用會繞過輸出驗證的串流方法。
+    return SecureAgent(agent)
