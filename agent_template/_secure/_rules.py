@@ -52,7 +52,8 @@ _INJECTION_RE = [re.compile(p, re.IGNORECASE) for p in _INJECTION_PATTERNS]
 # ---------------------------------------------------------------------------
 # PII / secrets detection
 # ---------------------------------------------------------------------------
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# 量詞上界化以避免長字串(無 @)時的二次方回溯(ReDoS);會跑在模型輸出上。
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}")
 # 信用卡:先抓 13-19 碼候選(限 ASCII 數字,配合 _luhn_ok 的 ord 運算),再用 Luhn 過濾
 # (濾掉 ISBN-13 / 時間戳等誤判;15 碼 IMEI 為 Luhn-valid 會殘留誤判,v1 接受,
 #  見 docs/superpowers/specs/p2-redteam-deferred-to-p3.md)

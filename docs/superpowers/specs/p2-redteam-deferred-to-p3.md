@@ -13,3 +13,8 @@
 - **工具輸入/輸出攔截**:封住 tool 端外洩需 tool-wrapping 子系統;v1 工具仍在使用者信任邊界內。
 - **Validator monkeypatch 硬化**:in-process validator 可 rebind `detect_pii`;唯有把 `_secure/` 以 Cython 編譯使綁定內部化才能真正緩解(=P3 核心目的)。
 - **IMEI 殘留誤判**:15 碼 IMEI 為 Luhn-valid 仍會被標記;v1 接受,以測試記錄而非再加 regex 扭曲。
+
+## P3 必須處理(來自 P2 最終整支審查)
+
+- **factory.py 不在編譯範圍內 → 完整性檢查必涵蓋 factory wiring(R1,重要)**:P3 僅編譯 `_secure/`,但「不可關閉」保證依賴 `factory.build_agent` 永遠注入 `build_security_middleware`。`factory.py` 維持純 Python,故 rebind `factory.build_security_middleware` / `factory._build_deep_agent` 即可在「編譯後」仍剝除外殼。P3 的完整性自檢(設計規格 §C)必須在 build 時驗證「實際掛上的 middleware 與 prompt 夾心為框架原生」,**或**把 factory 的安全 wiring 移進被編譯的套件。此屬「validator monkeypatch」同類,但延伸到 factory 接縫。
+- **`.stream()` / `.astream()` 輸出驗證繞過(C1)**:見 P2 後續決策;若 P2 採「停用 streaming / 包裝」則 P3 沿用,若延後則 P3 需提供「驗證過的串流」設計(緩衝後再吐 或 chunk 級驗證)。
