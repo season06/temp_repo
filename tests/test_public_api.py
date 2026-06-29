@@ -9,7 +9,7 @@ def test_public_surface():
 
 def test_all_is_exact_surface():
     assert set(agent_template.__all__) == {
-        "build_agent", "AgentConfig", "AgentTemplateError",
+        "build_agent", "AgentConfig", "Validator", "AgentTemplateError",
         "ConfigError", "ProviderError", "SecurityViolation", "__version__",
     }
 
