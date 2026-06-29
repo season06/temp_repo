@@ -7,6 +7,11 @@ class _Banned(Validator):
         return ["banned word"] if "banned" in text else []
 
 
+class _AlwaysFails(Validator):
+    def check(self, text) -> list:
+        return ["always"]
+
+
 def test_validator_is_abstract():
     with pytest.raises(TypeError):
         Validator()
@@ -20,3 +25,11 @@ def test_run_validators_clean():
 
 def test_run_validators_none():
     assert run_validators("anything", None) == []
+
+def test_run_validators_accumulates_across_validators():
+    out = run_validators("this is banned", [_Banned(), _AlwaysFails()])
+    assert out == ["banned word", "always"]
+
+
+def test_run_validators_empty_list():
+    assert run_validators("anything", []) == []
