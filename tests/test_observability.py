@@ -21,3 +21,11 @@ def test_usage_tracker_accumulates():
     s = t.summary()
     assert s == {"prompt_tokens": 13, "completion_tokens": 7,
                  "total_tokens": 20, "calls": 2}
+
+
+def test_get_logger_idempotent_handlers():
+    log1 = get_logger("agent_template.idem_test")
+    n_after_first = len(log1.handlers)
+    log2 = get_logger("agent_template.idem_test")
+    assert log1 is log2
+    assert len(log2.handlers) == n_after_first == 1
