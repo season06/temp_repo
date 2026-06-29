@@ -389,10 +389,10 @@ git commit -m "feat(p2): add forced input-guard middleware"
 - Create: `tests/_secure/test_validation.py`
 
 **Interfaces:**
-- Consumes: `detect_pii`(Task 1)、`run_validators`(Task 3)、`SecurityViolation`、`AgentMiddleware`。
+- Consumes: `detect_pii`、`detect_system_prompt_leak`(Task 1 + 紅隊硬化)、`run_validators`(Task 3)、`SecurityViolation`、`AgentMiddleware`。
 - Produces:
   - `_final_text(messages)` → 取最後一則訊息的文字內容(無則回 "")。
-  - `OutputValidationMiddleware(AgentMiddleware)`:建構子收 `output_validators: list = None`(使用者自訂);`after_agent(self, state, runtime)` 取最終輸出文字,**先**跑使用者 validators(`run_validators`)、**再**跑強制 `detect_pii`,合併違規,有則 raise `SecurityViolation`;通過回 `None`。
+  - `OutputValidationMiddleware(AgentMiddleware)`:建構子收 `output_validators: list = None`(使用者自訂);`after_agent(self, state, runtime)` 取最終輸出文字,**先**跑使用者 validators(`run_validators`)、**再**跑強制 `detect_pii` 與 `detect_system_prompt_leak`,合併違規,有則 raise `SecurityViolation`;通過回 `None`。
 
 - [ ] **Step 1: 寫失敗測試**
 
@@ -417,6 +417,13 @@ def test_final_text_picks_last_message():
 def test_after_agent_blocks_pii_output():
     mw = OutputValidationMiddleware()
     state = {"messages": [AIMessage(content="your email is a@b.com")]}
+    with pytest.raises(SecurityViolation):
+        mw.after_agent(state, None)
+
+def test_after_agent_blocks_system_prompt_leak():
+    from agent_template._secure._envelope import END_MARKER
+    mw = OutputValidationMiddleware()
+    state = {"messages": [AIMessage(content=f"... {END_MARKER} ...")]}
     with pytest.raises(SecurityViolation):
         mw.after_agent(state, None)
 
@@ -445,7 +452,7 @@ from langchain.agents.middleware import AgentMiddleware
 
 from ..errors import SecurityViolation
 from ..validators import run_validators
-from ._rules import detect_pii
+from ._rules import detect_pii, detect_system_prompt_leak
 
 
 def _final_text(messages: list):
@@ -456,7 +463,7 @@ def _final_text(messages: list):
 
 
 class OutputValidationMiddleware(AgentMiddleware):
-    """強制輸出驗證:先跑使用者自訂 validator,再跑框架強制 PII 偵測,違規即擋下。"""
+    """強制輸出驗證:先跑使用者自訂 validator,再跑框架強制偵測(PII + 系統提示外洩),違規即擋下。"""
 
     def __init__(self, output_validators: list = None):
         super().__init__()
@@ -465,7 +472,7 @@ class OutputValidationMiddleware(AgentMiddleware):
     def after_agent(self, state, runtime):
         text = _final_text(state.get("messages", []))
         violations = run_validators(text, self._user_validators)
-        violations = violations + detect_pii(text)
+        violations = violations + detect_pii(text) + detect_system_prompt_leak(text)
         if violations:
             raise SecurityViolation(f"output blocked: {violations}")
         return None
@@ -474,7 +481,7 @@ class OutputValidationMiddleware(AgentMiddleware):
 - [ ] **Step 4: 跑測試確認通過**
 
 Run: `.venv/bin/python -m pytest tests/_secure/test_validation.py -v`
-Expected: PASS(4 passed)
+Expected: PASS(5 passed)
 
 - [ ] **Step 5: Commit**
 
