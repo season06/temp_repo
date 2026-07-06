@@ -1,0 +1,45 @@
+stages:
+  - build
+  - verify
+
+default:
+  # full image (not -slim): includes gcc, which Nuitka needs for C compilation
+  image: python:3.14
+  before_script:
+    - pip install --no-cache-dir uv
+
+variables:
+  UV_PROJECT_ENVIRONMENT: .venv
+  # use uv-managed CPython (python-build-standalone) — it bundles the dev
+  # headers (Python.h) that Nuitka needs; the distro python often lacks them
+  UV_PYTHON_PREFERENCE: only-managed
+
+build-wheel:
+  stage: build
+  script:
+    # 1. install runtime dep (deepagents) + build tools (nuitka, build).
+    #    --no-install-project: don't install agent-demo yet — its wheel refers
+    #    to a .so that doesn't exist until step 2.
+    - uv sync --no-install-project
+    # 2. compile the single module -> build/agent_demo.cpython-*.so
+    - uv run --no-sync python -m nuitka --module agent_demo.py --output-dir=build --assume-yes-for-downloads
+    # 3. package the .so into a platform wheel. hatch_build.py globs the .so and
+    #    sets the cp<ver> tag, so no rename and no retag step are needed.
+    - uv run --no-sync python -m build --wheel
+    - ls -l dist
+  artifacts:
+    paths:
+      - dist/*.whl
+    expire_in: 1 week
+
+verify-wheel:
+  stage: verify
+  needs: ["build-wheel"]
+  script:
+    # fresh managed interpreter (same ABI as the build job); install ONLY the wheel
+    - uv venv /tmp/verify --python 3.14
+    - uv pip install --python /tmp/verify/bin/python dist/*.whl
+    # run from a dir without agent_demo.py so the installed .so is imported
+    - cp verify_import.py /tmp/verify_import.py
+    - cd /tmp
+    - /tmp/verify/bin/python verify_import.py
