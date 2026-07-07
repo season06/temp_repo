@@ -3,17 +3,23 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-template"
+name = "a2a-mvp"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+    "a2a-sdk==0.3.26",
+    "starlette",
+    "uvicorn",
+    "httpx",
+    "pyjwt[crypto]",
+    "sse-starlette",
     "deepagents",
     "langchain-openai",
     "langgraph",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-httpx"]
 
 [tool.setuptools.packages.find]
-include = ["agent_template*"]
+include = ["a2a_mvp*"]

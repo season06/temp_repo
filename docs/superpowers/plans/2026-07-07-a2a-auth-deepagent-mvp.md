@@ -74,6 +74,13 @@ for modname in [
 Run: `.venv/bin/python scratch_api_probe.py`
 Expected: 印出各模組真實符號。**把確認到的下列符號記在本任務下方**(供 Task 4–9 引用):Agent Card 建構型別、`AgentExecutor`/`RequestContext`/`EventQueue`、request handler、route 工廠或 `A2AStarletteApplication`、`InMemoryTaskStore`、client 建構、以及「取訊息文字」與「送 agent 文字回應」的 helper。刪除 `scratch_api_probe.py`。
 
+> **實測結果(2026-07-07):** `a2a-sdk==1.1.0` 已改用 protobuf 型別(`a2a_pb2.*`,無 `model_dump`、`AgentCard` 連 `url` 欄位都沒有),與本 plan 的 pydantic 假設不相容 → 依 Step 1 退版至 **`a2a-sdk==0.3.26`**(pydantic)。0.3.26 確認符號:
+> - Card:`a2a.types.{AgentCard, AgentSkill, AgentCapabilities}`(pydantic;建構參數為 **camelCase**:`defaultInputModes`/`defaultOutputModes`/`securitySchemes`(dict)/`security`)。`model_dump(by_alias=True)` 可用。
+> - App:`a2a.server.apps.A2AStarletteApplication`(用形狀 B;`a2a.server.routes` 不存在)。`DefaultRequestHandler(agent_executor, task_store)`(**不需** agent_card)。`a2a.server.tasks.InMemoryTaskStore()`。
+> - Executor:`a2a.server.agent_execution.{AgentExecutor, RequestContext}`;helper `a2a.utils.{new_agent_text_message, get_message_text}` 皆存在。
+> - Client:`a2a.client.{A2ACardResolver, ClientConfig, ClientFactory, create_text_message_object}`(**無 `create_client`**;改用 `ClientFactory(ClientConfig(...)).create(card)`,`send_message` 為 async iterator)。
+> - `sse-starlette` 為隱性相依(`A2AStarletteApplication` 需要),已加裝。
+
 - [ ] **Step 3: 寫 config 失敗測試**
 
 `tests/test_config.py`:
