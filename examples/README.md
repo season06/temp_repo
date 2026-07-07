@@ -33,3 +33,34 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:9999/ \
   -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":"1","method":"message/send","params":{}}'   # 401,缺 token
 ```
+
+## 5. 啟用 OpenTelemetry tracing(可選)
+
+需先裝 otel extra:
+```bash
+python3 -m pip --python .venv/bin/python install \
+  opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc \
+  opentelemetry-instrumentation-starlette opentelemetry-instrumentation-httpx
+```
+
+設環境變數後起 server(trace 走 OTLP/gRPC):
+```bash
+export A2A_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317   # 你的 collector
+export A2A_OTEL_SERVICE_NAME=a2a-mvp-deepagent
+.venv/bin/python examples/run_server.py
+```
+
+覆蓋範圍:入站 HTTP(Starlette)、a2a-sdk 內部分派(SDK 內建)、出站 peer 呼叫(httpx)。
+同一條 trace 會透過 W3C `traceparent` 自動跨 agent 串接。
+
+### 替代啟動法(零程式碼,auto-instrument 啟動器)
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+.venv/bin/python -m pip --python .venv/bin/python install opentelemetry-distro
+.venv/bin/opentelemetry-instrument .venv/bin/python -m a2a_mvp
+```
+
+### 已知缺口
+LLM / agent 推理層(deepagents/langchain/langgraph)的 span 尚未納入,走 LangChain 自身
+OTel / LangSmith,留待下一階段。
