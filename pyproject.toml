@@ -20,6 +20,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-httpx"]
+otel = [
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-instrumentation-starlette",
+    "opentelemetry-instrumentation-httpx",
+]
 
 [tool.setuptools.packages.find]
 include = ["a2a_mvp*"]

@@ -27,3 +27,26 @@ def test_defaults_when_optional_missing(monkeypatch):
     assert cfg.host == "127.0.0.1"
     assert cfg.port == 9999
     assert cfg.jwt_algorithms == ["HS256"]
+
+
+def test_otel_fields_default_off(monkeypatch):
+    import os
+    for k in list(os.environ):
+        if k.startswith("A2A_") or k == "OTEL_EXPORTER_OTLP_ENDPOINT":
+            monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("A2A_JWT_SECRET", "s")
+    cfg = Config.from_env()
+    assert cfg.otel_enabled is False
+    assert cfg.otel_service_name == "a2a-mvp-deepagent"
+    assert cfg.otel_exporter_endpoint == ""
+
+
+def test_otel_fields_from_env(monkeypatch):
+    monkeypatch.setenv("A2A_JWT_SECRET", "s")
+    monkeypatch.setenv("A2A_OTEL_ENABLED", "true")
+    monkeypatch.setenv("A2A_OTEL_SERVICE_NAME", "my-agent")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4317")
+    cfg = Config.from_env()
+    assert cfg.otel_enabled is True
+    assert cfg.otel_service_name == "my-agent"
+    assert cfg.otel_exporter_endpoint == "http://collector:4317"

@@ -18,6 +18,9 @@ class Config:
     public_url: str = "http://127.0.0.1:9999"
     allowed_remote_agents: list = field(default_factory=list)
     outbound_service_token: str = ""   # 出站呼叫 peer 帶的服務憑證
+    otel_enabled: bool = False
+    otel_service_name: str = "a2a-mvp-deepagent"
+    otel_exporter_endpoint: str = ""
 
     @classmethod
     def from_env(cls):
@@ -38,4 +41,7 @@ class Config:
             public_url=os.environ.get("A2A_PUBLIC_URL", cls.public_url),
             allowed_remote_agents=[r.strip() for r in remotes.split(",") if r.strip()],
             outbound_service_token=os.environ.get("A2A_OUTBOUND_SERVICE_TOKEN", ""),
+            otel_enabled=os.environ.get("A2A_OTEL_ENABLED", "").lower() in ("1", "true", "yes"),
+            otel_service_name=os.environ.get("A2A_OTEL_SERVICE_NAME", cls.otel_service_name),
+            otel_exporter_endpoint=os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
         )
