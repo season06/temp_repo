@@ -2,8 +2,10 @@
 import uvicorn
 from a2a_mvp.config import Config
 from a2a_mvp.server.app import build_app
+from a2a_mvp.telemetry import configure_tracing
 
 if __name__ == "__main__":
     cfg = Config.from_env()
+    configure_tracing(cfg)
     print(f"serving on http://{cfg.host}:{cfg.port}  card: {cfg.public_url}/.well-known/agent-card.json")
     uvicorn.run(build_app(cfg), host=cfg.host, port=cfg.port)

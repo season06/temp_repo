@@ -6,6 +6,7 @@ from a2a_mvp.agent import build_agent
 from a2a_mvp.server.executor import DeepAgentExecutor
 from a2a_mvp.server.card import build_agent_card
 from a2a_mvp.server.auth import AuthMiddleware
+from a2a_mvp.telemetry import instrument_app
 
 
 def build_app(config, model=None):
@@ -18,4 +19,5 @@ def build_app(config, model=None):
     app = A2AStarletteApplication(agent_card=card, http_handler=handler).build()
     app.add_middleware(AuthMiddleware, config=config,
                        exempt_paths=[AGENT_CARD_WELL_KNOWN_PATH])
+    instrument_app(app, config)
     return app
