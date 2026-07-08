@@ -1,7 +1,8 @@
 from langchain.agents.middleware import AgentMiddleware, hook_config
+from langchain_core.messages import ToolMessage
 
 from .hooks import HookContext, StopRound
-from .session import is_session_stop
+from .session import is_session_stop, SESSION_STOP
 
 
 class HookMiddleware(AgentMiddleware):
@@ -37,3 +38,37 @@ class HookMiddleware(AgentMiddleware):
             if isinstance(hook.after_llm(context), StopRound):
                 return {"jump_to": "end"}
         return None
+
+    def wrap_tool_call(self, request, handler):
+        tool_call = request.tool_call
+        before_context = HookContext(
+            phase="before_tool",
+            tool_name=tool_call["name"],
+            tool_args=tool_call.get("args"),
+        )
+        for hook in self._hooks:
+            if isinstance(hook.before_tool(before_context), StopRound):
+                return self._stop_message(tool_call, "stopped by hook")
+
+        result = handler(request)
+
+        after_context = HookContext(
+            phase="after_tool",
+            tool_name=tool_call["name"],
+            tool_args=tool_call.get("args"),
+            result=result,
+        )
+        for hook in self._hooks:
+            if isinstance(hook.after_tool(after_context), StopRound):
+                return self._stop_message(tool_call, getattr(result, "content", "stopped by hook"))
+
+        return result
+
+    def _stop_message(self, tool_call, content):
+        # 合成一則帶 session_stop 標記的 ToolMessage;下一個 before_model 會據此中止該輪。
+        return ToolMessage(
+            content=content,
+            tool_call_id=tool_call["id"],
+            name=tool_call["name"],
+            response_metadata={"status": SESSION_STOP},
+        )
