@@ -193,6 +193,17 @@ def test_integration_tool_native_session_stop_halts_with_no_hooks():
     assert out["messages"][-1].response_metadata.get("status") == "session_stop"
 
 
+def test_before_tool_stop_reason_surfaces_in_message():
+    class Denier(Hook):
+        def before_tool(self, context):
+            return StopRound(reason="nope-x")
+
+    mw = HookMiddleware([Denier()])
+    req = _FakeRequest({"name": "ping", "args": {}, "id": "c1", "type": "tool_call"})
+    result = mw.wrap_tool_call(req, lambda r: _ToolMessage(content="p", tool_call_id="c1", name="ping"))
+    assert result.content == "nope-x"
+
+
 def test_awrap_tool_call_runs_tool_when_allowed():
     import asyncio
 

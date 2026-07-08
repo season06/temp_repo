@@ -62,15 +62,17 @@ class HookMiddleware(AgentMiddleware):
     def _run_before_tool(self, tool_call):
         context = HookContext(phase="before_tool", tool_name=tool_call["name"], tool_args=tool_call.get("args"))
         for hook in self._hooks:
-            if isinstance(hook.before_tool(context), StopRound):
-                return self._stop_message(tool_call, "stopped by hook")
+            outcome = hook.before_tool(context)
+            if isinstance(outcome, StopRound):
+                return self._stop_message(tool_call, outcome.reason or "stopped by hook")
         return None
 
     def _run_after_tool(self, tool_call, result):
         context = HookContext(phase="after_tool", tool_name=tool_call["name"], tool_args=tool_call.get("args"), result=result)
         for hook in self._hooks:
-            if isinstance(hook.after_tool(context), StopRound):
-                return self._stop_message(tool_call, getattr(result, "content", "stopped by hook"))
+            outcome = hook.after_tool(context)
+            if isinstance(outcome, StopRound):
+                return self._stop_message(tool_call, outcome.reason or getattr(result, "content", "stopped by hook"))
         return result
 
     def _stop_message(self, tool_call, content):

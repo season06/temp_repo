@@ -58,6 +58,28 @@ def test_http_auth_client_error_fails_closed(monkeypatch):
     assert client.verify(HookContext(phase="before_tool", tool_name="t")) is False
 
 
+def test_http_auth_client_non_httperror_fails_closed(monkeypatch):
+    def boom(*a, **k):
+        raise httpx.InvalidURL("bad url")
+
+    monkeypatch.setattr(auth_mod.httpx, "post", boom)
+    client = HttpAuthClient("http://auth/verify")
+    assert client.verify(HookContext(phase="before_tool", tool_name="t")) is False
+
+
+def test_http_auth_client_sends_tool_name(monkeypatch):
+    captured = {}
+
+    def capture(url, json=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+        return _FakeResponse(200)
+
+    monkeypatch.setattr(auth_mod.httpx, "post", capture)
+    HttpAuthClient("http://auth/verify").verify(HookContext(phase="before_tool", tool_name="mytool"))
+    assert captured["json"] == {"tool": "mytool"}
+
+
 def test_auth_denies_tool_end_to_end_under_ainvoke():
     import asyncio
     from langchain_core.messages import AIMessage

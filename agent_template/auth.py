@@ -12,7 +12,7 @@ class AuthClient:
 
 class HttpAuthClient(AuthClient):
     """打一個 HTTP request 到 auth 端點;HTTP 200 代表放行（MVP mock）。
-    連線/HTTP 錯誤一律視為未通過（fail-closed）。"""
+    連線/HTTP 或任何錯誤一律視為未通過（fail-closed）。"""
 
     def __init__(self, endpoint, timeout=5.0):
         self._endpoint = endpoint
@@ -21,7 +21,7 @@ class HttpAuthClient(AuthClient):
     def verify(self, context):
         try:
             response = httpx.post(self._endpoint, json={"tool": context.tool_name}, timeout=self._timeout)
-        except httpx.HTTPError:
+        except Exception:
             return False
         return response.status_code == 200
 
