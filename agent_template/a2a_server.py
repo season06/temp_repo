@@ -25,6 +25,21 @@ def build_agent_card(name, url, version="0.1.0", description="", skills=None, st
     )
 
 
+def _extract_text(content):
+    """把 LLM 回應的 content 轉成文字:字串直接回;list-of-blocks 取各 text 區塊串接。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return "".join(parts)
+    return str(content)
+
+
 class AgentA2AExecutor(AgentExecutor):
     """把本 SDK 的原生 agent 接上 A2A。入站可選 async auth;通過後跑 agent.ainvoke,回最終文字。"""
 
@@ -40,7 +55,7 @@ class AgentA2AExecutor(AgentExecutor):
             return
         user_text = context.get_user_input()
         result = await self._agent.ainvoke({"messages": [("user", user_text)]})
-        reply_text = str(result["messages"][-1].content)
+        reply_text = _extract_text(result["messages"][-1].content)
         await event_queue.enqueue_event(
             new_text_message(text=reply_text, context_id=context.context_id, task_id=context.task_id)
         )

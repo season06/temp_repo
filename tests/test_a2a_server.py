@@ -63,3 +63,17 @@ def test_inbound_auth_deny_returns_unauthorized_without_running_agent():
 def test_inbound_auth_allow_runs_agent():
     app = build_a2a_app(_agent("allowed"), build_agent_card(name="Svc", url=BASE + "/"), auth_client=_Allow())
     assert asyncio.run(_roundtrip(app, "hello")) == "allowed"
+
+
+def test_roundtrip_extracts_text_from_block_list_content():
+    model = FakeToolModel(scripted=[AIMessage(content=[{"type": "text", "text": "hello"}, {"type": "text", "text": " world"}])])
+    agent = create_deep_agent(model=model, tools=[], system_prompt="x")
+    app = build_a2a_app(agent, build_agent_card(name="Svc", url=BASE + "/"))
+    assert asyncio.run(_roundtrip(app, "hi")) == "hello world"
+
+
+def test_extract_text_handles_str_list_and_other():
+    from agent_template.a2a_server import _extract_text
+    assert _extract_text("plain") == "plain"
+    assert _extract_text([{"type": "text", "text": "a"}, {"type": "image", "url": "x"}, {"type": "text", "text": "b"}]) == "ab"
+    assert _extract_text(123) == "123"

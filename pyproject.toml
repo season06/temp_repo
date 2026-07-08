@@ -23,3 +23,6 @@ packages = ["agent_template"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:.*label\\(\\) is deprecated.*:DeprecationWarning",
+]
