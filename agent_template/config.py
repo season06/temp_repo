@@ -1,3 +1,6 @@
+import os
+
+
 class AgentConfig:
     """單一 agent 的 LLM 設定（OpenAI-compatible 端點）。"""
 
@@ -7,3 +10,29 @@ class AgentConfig:
         self.model = model
         self.temperature = temperature
         self.system_prompt = system_prompt
+
+
+class Config:
+    """SDK runtime 設定：auth 端點與 Observability。"""
+
+    def __init__(self, auth_endpoint=None, otel_endpoint=None, sampling_ratio=1.0,
+                 o11y_enabled=True, cid=None, agent_version=None):
+        self.auth_endpoint = auth_endpoint
+        self.otel_endpoint = otel_endpoint
+        self.sampling_ratio = sampling_ratio
+        self.o11y_enabled = o11y_enabled
+        self.cid = cid
+        self.agent_version = agent_version
+
+    @classmethod
+    def from_env(cls):
+        ratio = os.environ.get("AGENT_OTEL_SAMPLING_RATIO")
+        enabled = os.environ.get("AGENT_O11Y_ENABLED")
+        return cls(
+            auth_endpoint=os.environ.get("AGENT_AUTH_ENDPOINT"),
+            otel_endpoint=os.environ.get("AGENT_OTEL_ENDPOINT"),
+            sampling_ratio=float(ratio) if ratio is not None else 1.0,
+            o11y_enabled=(enabled.lower() != "false") if enabled is not None else True,
+            cid=os.environ.get("AGENT_CID"),
+            agent_version=os.environ.get("AGENT_VERSION"),
+        )
