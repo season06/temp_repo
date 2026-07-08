@@ -35,3 +35,11 @@ def test_build_agent_wires_model_and_system_prompt(monkeypatch):
     assert agent == "AGENT"
     assert calls["model"] == "LLM"
     assert calls["system_prompt"] == "SP"
+
+
+def test_build_agent_returns_native_object_with_invoke_and_stream():
+    cfg = AgentConfig(api_key="dummy", base_url="http://localhost:9/v1", model="m")
+    agent = factory.build_agent(cfg)
+    assert agent is not None
+    assert callable(getattr(agent, "invoke", None))
+    assert callable(getattr(agent, "stream", None))
