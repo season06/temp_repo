@@ -1,8 +1,15 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from langchain_core.messages import BaseMessage
+
 # 團隊標準化 session_stop 狀態的 MVP 約定。團隊敲定欄位/結構後,只需替換本檔。
-SESSION_STOP = "session_stop"
+SESSION_STOP: str = "session_stop"
 
 
-def is_session_stop(message):
+def is_session_stop(message: BaseMessage | None) -> bool:
     """訊息是否帶團隊的 session_stop 狀態。
 
     MVP 約定（可替換）:訊息的 response_metadata 或 additional_kwargs（dict）
@@ -17,7 +24,7 @@ def is_session_stop(message):
     return False
 
 
-def make_session_stop_metadata():
+def make_session_stop_metadata() -> dict[str, str]:
     """建構帶 session_stop 狀態的 metadata dict。
     與 is_session_stop 共居;團隊敲定欄位/結構後,讀寫兩側一併在此檔更新。"""
     return {"status": SESSION_STOP}

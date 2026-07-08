@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 import asyncio
+from typing import TYPE_CHECKING
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
+if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
 
-def load_mcp_tools(connections):
+
+def load_mcp_tools(connections: dict[str, dict] | None) -> list[BaseTool]:
     """同步載入所有 MCP server 的 tools。
 
     connections: dict[server_name -> connection dict]，例如：
@@ -16,7 +22,7 @@ def load_mcp_tools(connections):
     if not connections:
         return []
 
-    async def _load():
+    async def _load() -> list[BaseTool]:
         client = MultiServerMCPClient(connections)
         return await client.get_tools()
 

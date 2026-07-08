@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 import logging
 import time
+from collections.abc import Callable
+from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from openinference.instrumentation.langchain import LangChainInstrumentor
@@ -16,11 +20,11 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
 
-def get_logger():
+def get_logger() -> logging.Logger:
     return logging.getLogger("agent_template")
 
 
-def build_resource(config):
+def build_resource(config: Any) -> Any:
     return Resource.create({
         "service.name": config.service_name,
         "cid": config.cid or "",
@@ -29,7 +33,7 @@ def build_resource(config):
     })
 
 
-def create_instruments(meter):
+def create_instruments(meter: Any) -> dict[str, Any]:
     return {
         "tool_calls": meter.create_counter("tool_calls_total"),
         "tool_duration": meter.create_histogram("tool_call_duration_seconds"),
@@ -41,16 +45,16 @@ def create_instruments(meter):
 class Observability:
     """o11y handle:enabled 旗標、metrics instruments、logger。disabled 時 instruments 為空、全部 no-op。"""
 
-    def __init__(self, enabled, instruments, logger):
+    def __init__(self, enabled: bool, instruments: dict[str, Any], logger: Any) -> None:
         self.enabled = enabled
         self.instruments = instruments
         self.logger = logger
 
 
-_state = {"handle": None, "handler": None, "providers": []}
+_state: dict = {"handle": None, "handler": None, "providers": []}
 
 
-def setup_observability(config):
+def setup_observability(config: Any) -> Observability:
     """建立 trace/metrics/log 管線並回傳 handle。o11y 關閉或設定失敗一律回傳 degraded handle,絕不 raise。
     冪等:重複呼叫回傳同一個快取的 handle,避免疊加 handler / 重複建立 providers。"""
     logger = get_logger()
@@ -84,7 +88,7 @@ def setup_observability(config):
         return Observability(False, {}, logger)
 
 
-def shutdown_observability():
+def shutdown_observability() -> None:
     """拆除 o11y 管線(移除 log handler、關閉 providers、uninstrument),並重置狀態。供 app 生命週期/測試使用。"""
     try:
         if _state["handler"] is not None:
@@ -108,13 +112,13 @@ class ObservabilityMiddleware(AgentMiddleware):
     """在 tool/model/agent 邊界記錄 metrics 與 log。每次記錄都 fail-safe,永不影響 main agent。
     instruments 為空(o11y 關閉)時全部 no-op。"""
 
-    def __init__(self, instruments, logger=None, model_name=None):
+    def __init__(self, instruments: dict[str, Any], logger: Any = None, model_name: str | None = None) -> None:
         super().__init__()
         self._instruments = instruments
         self._logger = logger
         self._model_name = model_name
 
-    def wrap_tool_call(self, request, handler):
+    def wrap_tool_call(self, request: Any, handler: Callable) -> Any:
         start = time.monotonic()
         status = "ok"
         try:
@@ -125,7 +129,7 @@ class ObservabilityMiddleware(AgentMiddleware):
         finally:
             self._record_tool(request, status, time.monotonic() - start)
 
-    async def awrap_tool_call(self, request, handler):
+    async def awrap_tool_call(self, request: Any, handler: Callable) -> Any:
         start = time.monotonic()
         status = "ok"
         try:
@@ -136,7 +140,7 @@ class ObservabilityMiddleware(AgentMiddleware):
         finally:
             self._record_tool(request, status, time.monotonic() - start)
 
-    def after_model(self, state, runtime):
+    def after_model(self, state: dict, runtime: Any) -> dict | None:
         if self._instruments:
             try:
                 last = state["messages"][-1]
@@ -149,7 +153,7 @@ class ObservabilityMiddleware(AgentMiddleware):
                 pass
         return None
 
-    def after_agent(self, state, runtime):
+    def after_agent(self, state: dict, runtime: Any) -> dict | None:
         if self._instruments:
             try:
                 self._instruments["agent_runs"].add(1, {"status": "ok"})
@@ -158,7 +162,7 @@ class ObservabilityMiddleware(AgentMiddleware):
                 pass
         return None
 
-    def _record_tool(self, request, status, duration):
+    def _record_tool(self, request: Any, status: str, duration: float) -> None:
         if not self._instruments:
             return
         try:
@@ -169,7 +173,7 @@ class ObservabilityMiddleware(AgentMiddleware):
         except Exception:
             pass
 
-    def _log(self, event, **fields):
+    def _log(self, event: str, **fields: Any) -> None:
         if self._logger is not None:
             try:
                 self._logger.info(event, extra=fields)

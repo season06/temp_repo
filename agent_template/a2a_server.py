@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from starlette.applications import Starlette
 
 from a2a.server.agent_execution import AgentExecutor
@@ -9,8 +13,19 @@ from a2a.helpers.proto_helpers import new_text_message
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 from a2a.utils.constants import DEFAULT_RPC_URL
 
+if TYPE_CHECKING:
+    from a2a.server.agent_execution import RequestContext
+    from a2a.server.events.event_queue import EventQueue
 
-def build_agent_card(name, url, version="0.1.0", description="", skills=None, streaming=True):
+
+def build_agent_card(
+    name: str,
+    url: str,
+    version: str = "0.1.0",
+    description: str = "",
+    skills: list | None = None,
+    streaming: bool = True,
+) -> AgentCard:
     if skills is None:
         skills = [AgentSkill(id="chat", name="Chat", description="Converse with the agent.", tags=["chat"])]
     return AgentCard(
@@ -25,7 +40,7 @@ def build_agent_card(name, url, version="0.1.0", description="", skills=None, st
     )
 
 
-def _extract_text(content):
+def _extract_text(content: Any) -> str:
     """把 LLM 回應的 content 轉成文字:字串直接回;list-of-blocks 取各 text 區塊串接。"""
     if isinstance(content, str):
         return content
@@ -43,11 +58,11 @@ def _extract_text(content):
 class AgentA2AExecutor(AgentExecutor):
     """把本 SDK 的原生 agent 接上 A2A。入站可選 async auth;通過後跑 agent.ainvoke,回最終文字。"""
 
-    def __init__(self, agent, auth_client=None):
+    def __init__(self, agent: Any, auth_client: Any = None) -> None:
         self._agent = agent
         self._auth_client = auth_client
 
-    async def execute(self, context, event_queue):
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         if self._auth_client is not None and not await self._auth_client.verify(context):
             await event_queue.enqueue_event(
                 new_text_message(text="unauthorized", context_id=context.context_id, task_id=context.task_id)
@@ -60,11 +75,11 @@ class AgentA2AExecutor(AgentExecutor):
             new_text_message(text=reply_text, context_id=context.context_id, task_id=context.task_id)
         )
 
-    async def cancel(self, context, event_queue):
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         return None
 
 
-def build_a2a_app(agent, card, auth_client=None):
+def build_a2a_app(agent: Any, card: AgentCard, auth_client: Any = None) -> Starlette:
     handler = DefaultRequestHandler(
         agent_executor=AgentA2AExecutor(agent, auth_client=auth_client),
         task_store=InMemoryTaskStore(),

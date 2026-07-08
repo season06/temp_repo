@@ -1,7 +1,12 @@
+from __future__ import annotations
+
+from typing import Any
+
+
 class StopRound:
     """由 Hook 方法回傳（或由內建 session_stop 檢查產生）以中止當前的 agent 執行（一輪）。"""
 
-    def __init__(self, reason=None):
+    def __init__(self, reason: str | None = None) -> None:
         self.reason = reason
 
 
@@ -14,7 +19,14 @@ class HookContext:
     result: after_llm 的 AI 訊息 / after_tool 的 tool 結果
     """
 
-    def __init__(self, phase, messages=None, tool_name=None, tool_args=None, result=None):
+    def __init__(
+        self,
+        phase: str,
+        messages: list | None = None,
+        tool_name: str | None = None,
+        tool_args: dict | None = None,
+        result: Any = None,
+    ) -> None:
         self.phase = phase
         self.messages = messages
         self.tool_name = tool_name
@@ -26,14 +38,14 @@ class Hook:
     """開發者面對的生命週期 hook。繼承並覆寫需要的節點。
     每個方法回傳 None 表示繼續,回傳 StopRound 表示中止該輪。"""
 
-    def before_llm(self, context):
+    def before_llm(self, context: HookContext) -> StopRound | None:
         return None
 
-    def after_llm(self, context):
+    def after_llm(self, context: HookContext) -> StopRound | None:
         return None
 
-    def before_tool(self, context):
+    def before_tool(self, context: HookContext) -> StopRound | None:
         return None
 
-    def after_tool(self, context):
+    def after_tool(self, context: HookContext) -> StopRound | None:
         return None
