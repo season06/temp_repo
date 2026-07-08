@@ -30,7 +30,7 @@ python3 -m pip --python .venv/bin/python install \
 
 ```python
 from agent_template.config import AgentConfig
-from agent_template.builder import AgentBuilder
+from agent_template.core import AgentBuilder
 
 config = AgentConfig(
     api_key="sk-...", base_url="http://localhost:8000/v1",
@@ -42,6 +42,39 @@ print(result["messages"][-1].content)
 ```
 
 > 掛載 MCP tool 後,agent 必須以 **`ainvoke` / `astream`** 執行(MCP tool 為 async-only)。
+
+## 專案結構
+
+依關注點分成子套件,每個子套件的 `__init__.py` 都 re-export 其公開名稱,所以匯入時用子套件路徑即可(如 `from agent_template.hooks import Hook`):
+
+```
+agent_template/
+├── __init__.py            # 版本
+├── config.py              # AgentConfig、Config
+├── core/                  # Agent 建構核心
+│   ├── factory.py         #   build_agent(注入 middleware,回傳原生物件)
+│   └── builder.py         #   AgentBuilder(累加式 add_mcp/add_skill/add_hook)
+├── hooks/                 # Hook / Middleware 機制
+│   ├── base.py            #   Hook、HookContext、StopRound
+│   ├── middleware.py      #   HookMiddleware(翻譯成 langchain middleware 的唯一模組)
+│   └── session.py         #   is_session_stop / make_session_stop_metadata
+├── auth/                  # 權限驗證
+│   └── clients.py         #   AuthClient / HttpAuthClient / AuthHook / Async* 版
+├── tools/                 # Skill 與 MCP 接入
+│   ├── mcp.py             #   load_mcp_tools(stdio + HTTP/SSE)
+│   └── skills.py          #   SkillRegistry / MockSkillRegistry / skill_to_tool
+├── observability/         # OpenTelemetry 監控
+│   └── otel.py            #   setup_observability / ObservabilityMiddleware / …
+└── a2a/                   # Agent-to-Agent(標準 a2a-sdk)
+    ├── server.py          #   build_agent_card / AgentA2AExecutor / build_a2a_app
+    └── client.py          #   call_agent
+
+examples/example_agent.py  # 串起全部功能的示範
+tests/                     # 單元 + 端到端驗收(tests/test_acceptance.py)
+docs/superpowers/          # 設計規格書 (specs/) 與分階段實作計畫 (plans/)
+```
+
+**匯入位置一覽:** `agent_template.config`(AgentConfig/Config)、`agent_template.core`(build_agent/AgentBuilder)、`agent_template.hooks`(Hook/HookMiddleware/…)、`agent_template.auth`(AuthHook/…)、`agent_template.tools`(load_mcp_tools/Skill/…)、`agent_template.observability`(setup_observability/…)、`agent_template.a2a`(build_a2a_app/call_agent/…)。
 
 ## 核心功能
 
@@ -85,7 +118,7 @@ A2A server 入站用 **async** 版 `AsyncHttpAuthClient`(見下)。`AuthClient` 
 ### 4. Skill 與 MCP
 
 ```python
-from agent_template.skills import MockSkillRegistry, Skill
+from agent_template.tools import MockSkillRegistry, Skill
 
 registry = MockSkillRegistry({"greet": Skill("greet", "greeting", "hi")})
 agent = (AgentBuilder(config, skill_registry=registry)
@@ -119,7 +152,7 @@ agent = AgentBuilder(config, observability=obs).build()
 
 ```python
 # server
-from agent_template.a2a_server import build_agent_card, build_a2a_app
+from agent_template.a2a import build_agent_card, build_a2a_app
 from agent_template.auth import AsyncHttpAuthClient
 import uvicorn
 
@@ -129,7 +162,7 @@ uvicorn.run(app, host="0.0.0.0", port=8000)
 
 # client(呼叫別的 agent)
 import httpx
-from agent_template.a2a_client import call_agent
+from agent_template.a2a import call_agent
 async with httpx.AsyncClient() as hc:
     reply = await call_agent(hc, "http://myhost:8000", "hi")
 ```
