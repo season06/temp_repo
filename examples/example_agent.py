@@ -4,17 +4,21 @@ from agent_template.auth import AuthHook, HttpAuthClient
 from agent_template.builder import AgentBuilder
 
 
-def build_example_agent(config, model=None, mcp=None, skill_ids=None, skill_registry=None,
-                        observability=None, auth_client=None, extra_hooks=None):
+def build_example_agent(agent_config, runtime_config=None, model=None, mcp=None, skill_ids=None,
+                        skill_registry=None, observability=None, auth_client=None, extra_hooks=None):
     """組出一個示範 agent 並回傳原生物件。
 
-    config: AgentConfig。model: 可注入自帶模型(測試/BYO)。
-    mcp: dict[name -> connection];skill_ids: list[str](需搭配 skill_registry)。
-    observability: setup_observability 的 handle;auth_client: 覆寫預設 HttpAuthClient。
-    extra_hooks: 額外的 Hook 清單。
+    agent_config: AgentConfig(LLM 設定)。runtime_config: Config(auth 端點等);
+      提供時,若未注入 auth_client,會用它建預設 HttpAuthClient。
+    model: 可注入自帶模型(測試/BYO)。mcp: dict[name -> connection];
+    skill_ids: list[str](需搭配 skill_registry)。observability: setup_observability 的 handle;
+    auth_client: 覆寫預設;extra_hooks: 額外 Hook 清單。
     """
-    builder = AgentBuilder(config, skill_registry=skill_registry, observability=observability, model=model)
-    builder.add_hook(AuthHook(auth_client if auth_client is not None else HttpAuthClient(config.auth_endpoint)))
+    builder = AgentBuilder(agent_config, skill_registry=skill_registry, observability=observability, model=model)
+    if auth_client is None and runtime_config is not None:
+        auth_client = HttpAuthClient(runtime_config.auth_endpoint)
+    if auth_client is not None:
+        builder.add_hook(AuthHook(auth_client))
     for hook in (extra_hooks or []):
         builder.add_hook(hook)
     for name, connection in (mcp or {}).items():
@@ -36,6 +40,7 @@ if __name__ == "__main__":
     )
     agent = build_example_agent(
         agent_config,
+        runtime_config=runtime,
         observability=setup_observability(runtime),
         mcp={"local": {"transport": "stdio", "command": "python", "args": ["my_mcp_server.py"]}},
     )

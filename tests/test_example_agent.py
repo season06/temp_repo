@@ -29,3 +29,12 @@ def test_build_example_agent_runs_skill_tool():
     contents = [str(getattr(m, "content", None)) for m in out["messages"]]
     assert any("hi-from-skill" in c for c in contents)  # skill tool executed
     assert out["messages"][-1].content == "done"
+
+
+def test_build_example_agent_default_auth_from_runtime_config_builds():
+    from agent_template.config import Config
+    model = FakeToolModel(scripted=[AIMessage(content="ok")])
+    agent = build_example_agent(_cfg(), runtime_config=Config(auth_endpoint="http://auth/verify"), model=model)
+    assert agent is not None
+    out = asyncio.run(agent.ainvoke({"messages": [("user", "hi")]}))
+    assert out["messages"][-1].content == "ok"
