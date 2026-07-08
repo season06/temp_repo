@@ -43,3 +43,33 @@ def test_build_agent_returns_native_object_with_invoke_and_stream():
     assert agent is not None
     assert callable(getattr(agent, "invoke", None))
     assert callable(getattr(agent, "stream", None))
+
+
+def test_build_agent_wires_hook_middleware_when_hooks_given(monkeypatch):
+    calls = {}
+
+    def fake_create_deep_agent(**kwargs):
+        calls.update(kwargs)
+        return "AGENT"
+
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", fake_create_deep_agent)
+
+    from agent_template.hooks import Hook
+    cfg = AgentConfig(api_key="k", base_url="b", model="m")
+    factory.build_agent(cfg, hooks=[Hook()])
+
+    mw = calls["middleware"]
+    assert len(mw) == 1
+    from agent_template._middleware import HookMiddleware
+    assert isinstance(mw[0], HookMiddleware)
+
+
+def test_build_agent_no_hooks_passes_empty_middleware(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+
+    cfg = AgentConfig(api_key="k", base_url="b", model="m")
+    factory.build_agent(cfg)
+    assert calls["middleware"] == []
