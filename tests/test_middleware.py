@@ -191,3 +191,89 @@ def test_integration_tool_native_session_stop_halts_with_no_hooks():
     contents = [getattr(m, "content", None) for m in out["messages"]]
     assert "should-not-reach" not in contents
     assert out["messages"][-1].response_metadata.get("status") == "session_stop"
+
+
+def test_awrap_tool_call_runs_tool_when_allowed():
+    import asyncio
+
+    mw = HookMiddleware([])
+    req = _FakeRequest({"name": "ping", "args": {"x": "hi"}, "id": "c1", "type": "tool_call"})
+
+    async def handler(r):
+        return _ToolMessage(content="pong:hi", tool_call_id="c1", name="ping")
+
+    result = asyncio.run(mw.awrap_tool_call(req, handler))
+    assert result.content == "pong:hi"
+
+
+def test_awrap_tool_call_before_tool_stop_short_circuits():
+    import asyncio
+
+    class Denier(Hook):
+        def before_tool(self, context):
+            return StopRound()
+
+    mw = HookMiddleware([Denier()])
+    req = _FakeRequest({"name": "ping", "args": {"x": "hi"}, "id": "c1", "type": "tool_call"})
+    handler_called = []
+
+    async def handler(r):
+        handler_called.append(True)
+        return _ToolMessage(content="pong", tool_call_id="c1", name="ping")
+
+    result = asyncio.run(mw.awrap_tool_call(req, handler))
+    assert handler_called == []
+    assert result.response_metadata.get("status") == "session_stop"
+
+
+def test_integration_ainvoke_before_tool_stop_halts_and_skips_tool():
+    import asyncio
+    from langchain_core.tools import tool
+    from tests.fakes import FakeToolModel
+
+    ran = []
+
+    class Denier(Hook):
+        def before_tool(self, context):
+            return StopRound()
+
+    @tool
+    def rec(x: str) -> str:
+        """records"""
+        ran.append(x)
+        return "ran"
+
+    model = FakeToolModel(scripted=[
+        AIMessage(content="", tool_calls=[{"name": "rec", "args": {"x": "hi"}, "id": "c1"}]),
+        AIMessage(content="should-not-reach"),
+    ])
+    agent = create_deep_agent(model=model, tools=[rec], system_prompt="x",
+                              middleware=[HookMiddleware([Denier()])])
+    out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}))
+    contents = [str(getattr(m, "content", None)) for m in out["messages"]]
+    assert ran == []
+    assert "should-not-reach" not in contents
+
+
+def test_integration_ainvoke_allows_tool_when_no_stop():
+    import asyncio
+    from langchain_core.tools import tool
+    from tests.fakes import FakeToolModel
+
+    ran = []
+
+    @tool
+    def rec(x: str) -> str:
+        """records"""
+        ran.append(x)
+        return "ran"
+
+    model = FakeToolModel(scripted=[
+        AIMessage(content="", tool_calls=[{"name": "rec", "args": {"x": "hi"}, "id": "c1"}]),
+        AIMessage(content="done"),
+    ])
+    agent = create_deep_agent(model=model, tools=[rec], system_prompt="x",
+                              middleware=[HookMiddleware([])])
+    out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}))
+    assert ran == ["hi"]
+    assert out["messages"][-1].content == "done"

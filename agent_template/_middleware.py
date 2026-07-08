@@ -45,27 +45,32 @@ class HookMiddleware(AgentMiddleware):
 
     def wrap_tool_call(self, request, handler):
         tool_call = request.tool_call
-        before_context = HookContext(
-            phase="before_tool",
-            tool_name=tool_call["name"],
-            tool_args=tool_call.get("args"),
-        )
+        blocked = self._run_before_tool(tool_call)
+        if blocked is not None:
+            return blocked
+        return self._run_after_tool(tool_call, handler(request))
+
+    async def awrap_tool_call(self, request, handler):
+        # MCP tool 為 async-only → agent 走 ainvoke;langchain 的 awrap_tool_call
+        # 不會 fallback 到 sync 版,故必須提供本方法,hooks/auth 才會在 async 執行下生效。
+        tool_call = request.tool_call
+        blocked = self._run_before_tool(tool_call)
+        if blocked is not None:
+            return blocked
+        return self._run_after_tool(tool_call, await handler(request))
+
+    def _run_before_tool(self, tool_call):
+        context = HookContext(phase="before_tool", tool_name=tool_call["name"], tool_args=tool_call.get("args"))
         for hook in self._hooks:
-            if isinstance(hook.before_tool(before_context), StopRound):
+            if isinstance(hook.before_tool(context), StopRound):
                 return self._stop_message(tool_call, "stopped by hook")
+        return None
 
-        result = handler(request)
-
-        after_context = HookContext(
-            phase="after_tool",
-            tool_name=tool_call["name"],
-            tool_args=tool_call.get("args"),
-            result=result,
-        )
+    def _run_after_tool(self, tool_call, result):
+        context = HookContext(phase="after_tool", tool_name=tool_call["name"], tool_args=tool_call.get("args"), result=result)
         for hook in self._hooks:
-            if isinstance(hook.after_tool(after_context), StopRound):
+            if isinstance(hook.after_tool(context), StopRound):
                 return self._stop_message(tool_call, getattr(result, "content", "stopped by hook"))
-
         return result
 
     def _stop_message(self, tool_call, content):
