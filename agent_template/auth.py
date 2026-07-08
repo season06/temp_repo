@@ -37,3 +37,27 @@ class AuthHook(Hook):
         if self._client.verify(context):
             return None
         return StopRound(reason="auth denied for tool: " + str(context.tool_name))
+
+
+class AsyncAuthClient:
+    """非同步 auth 介面(A2A 入站用);verify 回傳 True=放行。"""
+
+    async def verify(self, context):
+        raise NotImplementedError
+
+
+class AsyncHttpAuthClient(AsyncAuthClient):
+    """非同步版:httpx.AsyncClient 打 auth 端點,200=放行;任何錯誤 fail-closed。
+    用於 A2A server 入站邊界(不阻塞 event loop)。"""
+
+    def __init__(self, endpoint, timeout=5.0):
+        self._endpoint = endpoint
+        self._timeout = timeout
+
+    async def verify(self, context):
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self._endpoint, json={"source": "a2a"}, timeout=self._timeout)
+        except Exception:
+            return False
+        return response.status_code == 200

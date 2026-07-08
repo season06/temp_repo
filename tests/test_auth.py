@@ -134,3 +134,50 @@ def test_auth_allows_tool_end_to_end_under_ainvoke():
     contents = [str(getattr(m, "content", None)) for m in out["messages"]]
     assert ran == ["go"]           # tool ran
     assert "after" in contents     # round continued
+
+
+import asyncio
+
+
+class _FakeAsyncClient:
+    def __init__(self, response=None, raise_exc=None):
+        self._response = response
+        self._raise = raise_exc
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, *a, **k):
+        if self._raise is not None:
+            raise self._raise
+        return self._response
+
+
+def test_base_async_auth_client_not_implemented():
+    async def go():
+        from agent_template.auth import AsyncAuthClient
+        await AsyncAuthClient().verify(None)
+
+    with pytest.raises(NotImplementedError):
+        asyncio.run(go())
+
+
+def test_async_http_auth_200_allows(monkeypatch):
+    from agent_template.auth import AsyncHttpAuthClient
+    monkeypatch.setattr(auth_mod.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient(response=_FakeResponse(200)))
+    assert asyncio.run(AsyncHttpAuthClient("http://auth").verify(None)) is True
+
+
+def test_async_http_auth_non_200_denies(monkeypatch):
+    from agent_template.auth import AsyncHttpAuthClient
+    monkeypatch.setattr(auth_mod.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient(response=_FakeResponse(403)))
+    assert asyncio.run(AsyncHttpAuthClient("http://auth").verify(None)) is False
+
+
+def test_async_http_auth_error_fails_closed(monkeypatch):
+    from agent_template.auth import AsyncHttpAuthClient
+    monkeypatch.setattr(auth_mod.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient(raise_exc=RuntimeError("boom")))
+    assert asyncio.run(AsyncHttpAuthClient("http://auth").verify(None)) is False
