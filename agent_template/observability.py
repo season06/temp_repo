@@ -1,5 +1,7 @@
 import logging
+import time
 
+from langchain.agents.middleware import AgentMiddleware
 from openinference.instrumentation.langchain import LangChainInstrumentor
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
@@ -68,3 +70,77 @@ def setup_observability(config):
     except Exception:
         # 監控設定失敗絕不影響 main agent
         return Observability(False, {}, logger)
+
+
+class ObservabilityMiddleware(AgentMiddleware):
+    """在 tool/model/agent 邊界記錄 metrics 與 log。每次記錄都 fail-safe,永不影響 main agent。
+    instruments 為空(o11y 關閉)時全部 no-op。"""
+
+    def __init__(self, instruments, logger=None, model_name=None):
+        super().__init__()
+        self._instruments = instruments
+        self._logger = logger
+        self._model_name = model_name
+
+    def wrap_tool_call(self, request, handler):
+        tool_name = request.tool_call["name"]
+        start = time.monotonic()
+        status = "ok"
+        try:
+            return handler(request)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            self._record_tool(tool_name, status, time.monotonic() - start)
+
+    async def awrap_tool_call(self, request, handler):
+        tool_name = request.tool_call["name"]
+        start = time.monotonic()
+        status = "ok"
+        try:
+            return await handler(request)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            self._record_tool(tool_name, status, time.monotonic() - start)
+
+    def after_model(self, state, runtime):
+        if self._instruments:
+            try:
+                last = state["messages"][-1]
+                usage = getattr(last, "usage_metadata", None)
+                if usage:
+                    tokens = self._instruments["llm_tokens"]
+                    tokens.add(usage.get("input_tokens", 0), {"type": "input", "model": self._model_name or ""})
+                    tokens.add(usage.get("output_tokens", 0), {"type": "output", "model": self._model_name or ""})
+            except Exception:
+                pass
+        return None
+
+    def after_agent(self, state, runtime):
+        if self._instruments:
+            try:
+                self._instruments["agent_runs"].add(1, {"status": "ok"})
+                self._log("agent_run", status="ok")
+            except Exception:
+                pass
+        return None
+
+    def _record_tool(self, tool_name, status, duration):
+        if not self._instruments:
+            return
+        try:
+            self._instruments["tool_calls"].add(1, {"tool": tool_name, "status": status})
+            self._instruments["tool_duration"].record(duration, {"tool": tool_name})
+            self._log("tool_call", tool=tool_name, status=status)
+        except Exception:
+            pass
+
+    def _log(self, event, **fields):
+        if self._logger is not None:
+            try:
+                self._logger.info(event, extra=fields)
+            except Exception:
+                pass
