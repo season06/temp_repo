@@ -57,3 +57,25 @@ def test_config_from_env_uses_defaults_when_unset(monkeypatch):
     assert cfg.auth_endpoint is None
     assert cfg.sampling_ratio == 1.0
     assert cfg.o11y_enabled is True
+
+
+import pytest
+
+
+@pytest.mark.parametrize("value", ["false", "False", "0", "no", "OFF", "off"])
+def test_o11y_enabled_disabled_values(monkeypatch, value):
+    monkeypatch.setenv("AGENT_O11Y_ENABLED", value)
+    assert Config.from_env().o11y_enabled is False
+
+
+@pytest.mark.parametrize("value", ["true", "1", "yes", "anything"])
+def test_o11y_enabled_truthy_values(monkeypatch, value):
+    monkeypatch.setenv("AGENT_O11Y_ENABLED", value)
+    assert Config.from_env().o11y_enabled is True
+
+
+def test_service_name_default_and_env(monkeypatch):
+    monkeypatch.delenv("AGENT_SERVICE_NAME", raising=False)
+    assert Config.from_env().service_name == "agent_template"
+    monkeypatch.setenv("AGENT_SERVICE_NAME", "my-svc")
+    assert Config.from_env().service_name == "my-svc"
