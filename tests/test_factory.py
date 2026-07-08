@@ -90,3 +90,38 @@ def test_build_agent_defaults_tools_to_empty(monkeypatch):
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
     factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"))
     assert calls["tools"] == []
+
+
+def test_build_agent_appends_observability_middleware_when_enabled(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+
+    from agent_template.observability import ObservabilityMiddleware
+    from agent_template.hooks import Hook
+
+    class _Obs:
+        enabled = True
+        instruments = {"tool_calls": None, "tool_duration": None, "llm_tokens": None, "agent_runs": None}
+        logger = None
+
+    cfg = AgentConfig(api_key="k", base_url="b", model="m")
+    factory.build_agent(cfg, hooks=[Hook()], observability=_Obs())
+    mw = calls["middleware"]
+    assert any(isinstance(m, ObservabilityMiddleware) for m in mw)
+
+
+def test_build_agent_no_observability_middleware_when_disabled(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+
+    from agent_template.observability import ObservabilityMiddleware
+
+    class _ObsOff:
+        enabled = False
+        instruments = {}
+        logger = None
+
+    factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"), observability=_ObsOff())
+    assert not any(isinstance(m, ObservabilityMiddleware) for m in calls["middleware"])
