@@ -2,7 +2,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from agent_template.config import Config
-from agent_template import observability as obs_mod
+from agent_template.observability import otel as obs_mod
 from agent_template.observability import build_resource, create_instruments, setup_observability, shutdown_observability
 
 

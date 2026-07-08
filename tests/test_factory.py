@@ -1,4 +1,4 @@
-from agent_template import factory
+from agent_template.core import factory
 from agent_template.config import AgentConfig
 
 
@@ -61,7 +61,7 @@ def test_build_agent_wires_hook_middleware_when_hooks_given(monkeypatch):
 
     mw = calls["middleware"]
     assert len(mw) == 1
-    from agent_template._middleware import HookMiddleware
+    from agent_template.hooks import HookMiddleware
     assert isinstance(mw[0], HookMiddleware)
 
 

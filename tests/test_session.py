@@ -1,6 +1,6 @@
 from langchain_core.messages import AIMessage, ToolMessage
 
-from agent_template.session import is_session_stop, SESSION_STOP
+from agent_template.hooks import is_session_stop, SESSION_STOP
 
 
 def test_session_stop_constant():

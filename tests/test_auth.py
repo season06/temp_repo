@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from agent_template import auth as auth_mod
+from agent_template.auth import clients as auth_mod
 from agent_template.auth import AuthClient, HttpAuthClient, AuthHook
 from agent_template.hooks import HookContext, StopRound
 
@@ -85,7 +85,7 @@ def test_auth_denies_tool_end_to_end_under_ainvoke():
     from langchain_core.messages import AIMessage
     from langchain_core.tools import tool
     from deepagents import create_deep_agent
-    from agent_template._middleware import HookMiddleware
+    from agent_template.hooks import HookMiddleware
     from tests.fakes import FakeToolModel
 
     ran = []
@@ -113,7 +113,7 @@ def test_auth_allows_tool_end_to_end_under_ainvoke():
     from langchain_core.messages import AIMessage
     from langchain_core.tools import tool
     from deepagents import create_deep_agent
-    from agent_template._middleware import HookMiddleware
+    from agent_template.hooks import HookMiddleware
     from tests.fakes import FakeToolModel
 
     ran = []

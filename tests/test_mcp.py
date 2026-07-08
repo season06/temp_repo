@@ -2,8 +2,8 @@ import asyncio
 import os
 import sys
 
-from agent_template import mcp as mcp_mod
-from agent_template.mcp import load_mcp_tools
+from agent_template.tools import mcp as mcp_mod
+from agent_template.tools import load_mcp_tools
 
 
 def test_empty_connections_returns_empty():

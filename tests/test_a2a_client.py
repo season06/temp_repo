@@ -4,8 +4,8 @@ import httpx
 from langchain_core.messages import AIMessage
 from deepagents import create_deep_agent
 
-from agent_template.a2a_server import build_agent_card, build_a2a_app
-from agent_template.a2a_client import call_agent
+from agent_template.a2a import build_agent_card, build_a2a_app
+from agent_template.a2a import call_agent
 from tests.fakes import FakeToolModel
 
 BASE = "http://test"

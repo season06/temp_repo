@@ -1,7 +1,7 @@
 from langchain_core.messages import AIMessage, HumanMessage
 from deepagents import create_deep_agent
 
-from agent_template._middleware import HookMiddleware
+from agent_template.hooks import HookMiddleware
 from agent_template.hooks import Hook, StopRound
 from tests.fakes import FakeToolModel, ping
 

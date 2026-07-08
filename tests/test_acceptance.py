@@ -6,14 +6,14 @@ import httpx
 from langchain_core.messages import AIMessage
 
 from agent_template.config import AgentConfig
-from agent_template.builder import AgentBuilder
+from agent_template.core import AgentBuilder
 from agent_template.hooks import Hook, StopRound
 from agent_template.auth import AuthHook
-from agent_template.skills import Skill, MockSkillRegistry
+from agent_template.tools import Skill, MockSkillRegistry
 from agent_template.observability import ObservabilityMiddleware, create_instruments
-from agent_template._middleware import HookMiddleware
-from agent_template.a2a_server import build_agent_card, build_a2a_app
-from agent_template.a2a_client import call_agent
+from agent_template.hooks import HookMiddleware
+from agent_template.a2a import build_agent_card, build_a2a_app
+from agent_template.a2a import call_agent
 from tests.fakes import FakeToolModel
 
 from opentelemetry.sdk.metrics import MeterProvider

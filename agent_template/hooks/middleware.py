@@ -7,7 +7,7 @@ from collections.abc import Callable
 from langchain.agents.middleware import AgentMiddleware, hook_config
 from langchain_core.messages import ToolMessage
 
-from .hooks import Hook, HookContext, StopRound
+from .base import Hook, HookContext, StopRound
 from .session import is_session_stop, make_session_stop_metadata
 
 

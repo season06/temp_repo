@@ -4,10 +4,10 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from .hooks import Hook, StopRound
+from ..hooks import Hook, StopRound
 
 if TYPE_CHECKING:
-    from .hooks import HookContext
+    from ..hooks import HookContext
 
 
 class AuthClient:

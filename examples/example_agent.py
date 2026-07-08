@@ -1,7 +1,7 @@
 """示範 Agent:用 agent_template 串起 auth / MCP / skill / observability / hooks。"""
 
 from agent_template.auth import AuthHook, HttpAuthClient
-from agent_template.builder import AgentBuilder
+from agent_template.core import AgentBuilder
 
 
 def build_example_agent(agent_config, runtime_config=None, model=None, mcp=None, skill_ids=None,

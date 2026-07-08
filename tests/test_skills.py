@@ -1,6 +1,6 @@
 import pytest
 
-from agent_template.skills import Skill, SkillRegistry, MockSkillRegistry, skill_to_tool
+from agent_template.tools import Skill, SkillRegistry, MockSkillRegistry, skill_to_tool
 
 
 def test_mock_registry_get_returns_skill():

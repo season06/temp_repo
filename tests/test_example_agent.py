@@ -3,7 +3,7 @@ import asyncio
 from langchain_core.messages import AIMessage
 
 from agent_template.config import AgentConfig
-from agent_template.skills import Skill, MockSkillRegistry
+from agent_template.tools import Skill, MockSkillRegistry
 from examples.example_agent import build_example_agent
 from tests.fakes import FakeToolModel
 

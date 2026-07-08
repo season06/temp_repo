@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .factory import build_agent
-from .mcp import load_mcp_tools
-from .skills import MockSkillRegistry, skill_to_tool
+from ..tools import load_mcp_tools
+from ..tools import MockSkillRegistry, skill_to_tool
 
 if TYPE_CHECKING:
-    from .config import AgentConfig
+    from ..config import AgentConfig
 
 
 class AgentBuilder:

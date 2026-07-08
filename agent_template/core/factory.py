@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING, Any
 from deepagents import create_deep_agent
 from langchain_openai import ChatOpenAI
 
-from ._middleware import HookMiddleware
-from .observability import ObservabilityMiddleware
+from ..hooks import HookMiddleware
+from ..observability import ObservabilityMiddleware
 
 if TYPE_CHECKING:
-    from .config import AgentConfig
+    from ..config import AgentConfig
 
 
 def _build_llm(config: AgentConfig) -> Any:

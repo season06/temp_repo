@@ -1,12 +1,12 @@
 import os
 import sys
 
-import agent_template.builder as bmod
-import agent_template.factory as factory
-from agent_template.builder import AgentBuilder
+import agent_template.core.builder as bmod
+import agent_template.core.factory as factory
+from agent_template.core import AgentBuilder
 from agent_template.config import AgentConfig
 from agent_template.hooks import Hook
-from agent_template.skills import Skill, MockSkillRegistry
+from agent_template.tools import Skill, MockSkillRegistry
 
 
 def _cfg():
