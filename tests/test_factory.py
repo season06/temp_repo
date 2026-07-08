@@ -17,3 +17,21 @@ def test_build_llm_passes_openai_compatible_params(monkeypatch):
     assert captured["base_url"] == "http://localhost/v1"
     assert captured["model"] == "qwen"
     assert captured["temperature"] == 0.2
+
+
+def test_build_agent_wires_model_and_system_prompt(monkeypatch):
+    calls = {}
+
+    def fake_create_deep_agent(**kwargs):
+        calls.update(kwargs)
+        return "AGENT"
+
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", fake_create_deep_agent)
+
+    cfg = AgentConfig(api_key="k", base_url="b", model="m", system_prompt="SP")
+    agent = factory.build_agent(cfg)
+
+    assert agent == "AGENT"
+    assert calls["model"] == "LLM"
+    assert calls["system_prompt"] == "SP"
