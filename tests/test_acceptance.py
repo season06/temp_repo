@@ -133,16 +133,29 @@ def test_acceptance_auth_deny_blocks_tool_and_halts():
 
 # req.md 驗收點 3c:session_stop 中止該輪
 def test_acceptance_session_stop_halts_round():
+    ran = []
+    from langchain_core.tools import tool
+
+    @tool
+    def act(x: str) -> str:
+        """a"""
+        ran.append(x)
+        return "did"
+
     class Stopper(Hook):
         def after_llm(self, c):
             return StopRound(reason="stop")
 
-    model = FakeToolModel(scripted=[AIMessage(content="first"), AIMessage(content="should-not-reach")])
-    agent = create_deep_agent(model=model, tools=[], system_prompt="x",
+    model = FakeToolModel(scripted=[
+        AIMessage(content="", tool_calls=[{"name": "act", "args": {"x": "h"}, "id": "c1"}]),
+        AIMessage(content="should-not-reach"),
+    ])
+    agent = create_deep_agent(model=model, tools=[act], system_prompt="x",
                               middleware=[HookMiddleware([Stopper()])])
     out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}))
     contents = [str(getattr(m, "content", None)) for m in out["messages"]]
-    assert "should-not-reach" not in contents
+    assert ran == []                       # after_llm StopRound halted BEFORE the tool ran
+    assert "should-not-reach" not in contents  # round halted, second LLM turn never reached
 
 
 # req.md 驗收點 4:A2A server 被 client 呼叫(card 發現 + 入站 auth)
