@@ -30,6 +30,8 @@ def build_example_agent(agent_config, runtime_config=None, model=None, mcp=None,
 
 if __name__ == "__main__":
     # 真實用法(需可用的 OpenAI-compatible 端點、auth 端點;o11y 選用):
+    import asyncio
+
     from agent_template.config import AgentConfig, Config
     from agent_template.observability import setup_observability
 
@@ -44,5 +46,5 @@ if __name__ == "__main__":
         observability=setup_observability(runtime),
         mcp={"local": {"transport": "stdio", "command": "python", "args": ["my_mcp_server.py"]}},
     )
-    result = agent.invoke({"messages": [("user", "Hello!")]})
+    result = asyncio.run(agent.ainvoke({"messages": [("user", "Hello!")]}))
     print(result["messages"][-1].content)

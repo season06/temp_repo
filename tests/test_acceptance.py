@@ -158,6 +158,28 @@ def test_acceptance_session_stop_halts_round():
     assert "should-not-reach" not in contents  # round halted, second LLM turn never reached
 
 
+# req.md 驗收點 3c':tool/mcp server 回覆 session_stop 狀態 → before_model 捕捉並中止(零 hook)
+def test_acceptance_session_stop_from_server_status_halts():
+    from langchain_core.tools import tool
+    from langchain_core.messages import ToolMessage
+
+    @tool
+    def stopper(x: str) -> str:
+        """returns a session_stop-tagged ToolMessage"""
+        return ToolMessage(content="stop", tool_call_id="c1", name="stopper",
+                           response_metadata={"status": "session_stop"})
+
+    model = FakeToolModel(scripted=[
+        AIMessage(content="", tool_calls=[{"name": "stopper", "args": {"x": "h"}, "id": "c1"}]),
+        AIMessage(content="should-not-reach"),
+    ])
+    agent = create_deep_agent(model=model, tools=[stopper], system_prompt="x",
+                              middleware=[HookMiddleware([])])
+    out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}))
+    contents = [str(getattr(m, "content", None)) for m in out["messages"]]
+    assert "should-not-reach" not in contents  # server session_stop status caught by before_model, round halted
+
+
 # req.md 驗收點 4:A2A server 被 client 呼叫(card 發現 + 入站 auth)
 def test_acceptance_a2a_roundtrip_and_inbound_auth():
     def _agent(reply):
@@ -200,6 +222,15 @@ def test_acceptance_observability_metrics_and_failsafe():
     assert totals.get("tool_calls_total") == 1
     assert totals.get("agent_runs_total") == 1
     assert totals.get("llm_tokens_total") == 5
+
+    duration_count = 0
+    for rm in reader.get_metrics_data().resource_metrics:
+        for sm in rm.scope_metrics:
+            for m in sm.metrics:
+                if m.name == "tool_call_duration_seconds":
+                    for dp in m.data.data_points:
+                        duration_count += dp.count
+    assert duration_count >= 1  # tool 執行時間 histogram recorded
 
     class _Boom:
         def add(self, *a, **k): raise RuntimeError("otel down")
