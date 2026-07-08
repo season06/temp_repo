@@ -73,3 +73,20 @@ def test_build_agent_no_hooks_passes_empty_middleware(monkeypatch):
     cfg = AgentConfig(api_key="k", base_url="b", model="m")
     factory.build_agent(cfg)
     assert calls["middleware"] == []
+
+
+def test_build_agent_passes_tools(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+    cfg = AgentConfig(api_key="k", base_url="b", model="m")
+    factory.build_agent(cfg, tools=["T1", "T2"])
+    assert calls["tools"] == ["T1", "T2"]
+
+
+def test_build_agent_defaults_tools_to_empty(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+    factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"))
+    assert calls["tools"] == []
