@@ -3,7 +3,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from agent_template.config import Config
 from agent_template import observability as obs_mod
-from agent_template.observability import build_resource, create_instruments, setup_observability
+from agent_template.observability import build_resource, create_instruments, setup_observability, shutdown_observability
 
 
 def _in_memory_meter():
@@ -42,13 +42,12 @@ def test_setup_failure_is_swallowed(monkeypatch):
 
 
 def test_setup_enabled_builds_instruments_then_uninstrument():
-    from openinference.instrumentation.langchain import LangChainInstrumentor
     handle = setup_observability(Config(o11y_enabled=True, otel_endpoint="http://localhost:4318"))
     try:
         assert handle.enabled is True
         assert set(handle.instruments.keys()) == {"tool_calls", "tool_duration", "llm_tokens", "agent_runs"}
     finally:
-        LangChainInstrumentor().uninstrument()
+        shutdown_observability()
 
 
 def test_metrics_recorded_end_to_end_under_ainvoke():
@@ -128,3 +127,18 @@ def test_disabled_instruments_noop():
     from langchain_core.messages import ToolMessage
     result = mw.wrap_tool_call(_Req(), lambda r: ToolMessage(content="ok", tool_call_id="c1", name="ping"))
     assert result.content == "ok"  # no-op passthrough
+
+
+def test_setup_is_idempotent_and_shutdown_resets():
+    from agent_template.observability import setup_observability, shutdown_observability, get_logger
+    cfg = Config(o11y_enabled=True, otel_endpoint="http://localhost:4318")
+    logger = get_logger()
+    before = len(logger.handlers)
+    h1 = setup_observability(cfg)
+    h2 = setup_observability(cfg)
+    try:
+        assert h1 is h2                              # idempotent: same handle
+        assert len(logger.handlers) == before + 1    # only one handler despite two setups
+    finally:
+        shutdown_observability()
+    assert len(logger.handlers) == before            # shutdown removed the handler

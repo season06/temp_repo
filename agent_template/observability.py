@@ -13,6 +13,7 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
 
 def get_logger():
@@ -24,6 +25,7 @@ def build_resource(config):
         "service.name": config.service_name,
         "cid": config.cid or "",
         "agent.version": config.agent_version or "",
+        "framework": "deepagents",
     })
 
 
@@ -45,31 +47,61 @@ class Observability:
         self.logger = logger
 
 
+_state = {"handle": None, "handler": None, "providers": []}
+
+
 def setup_observability(config):
-    """建立 trace/metrics/log 管線並回傳 handle。o11y 關閉或設定失敗一律回傳 degraded handle,絕不 raise。"""
+    """建立 trace/metrics/log 管線並回傳 handle。o11y 關閉或設定失敗一律回傳 degraded handle,絕不 raise。
+    冪等:重複呼叫回傳同一個快取的 handle,避免疊加 handler / 重複建立 providers。"""
     logger = get_logger()
     if not config.o11y_enabled:
         return Observability(False, {}, logger)
+    if _state["handle"] is not None:
+        return _state["handle"]  # idempotent: avoid stacked handlers / duplicate providers
     try:
         resource = build_resource(config)
         endpoint = config.otel_endpoint
-
-        tracer_provider = TracerProvider(resource=resource)
+        tracer_provider = TracerProvider(resource=resource, sampler=TraceIdRatioBased(config.sampling_ratio))
         tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
         LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
 
         reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint))
-        meter = MeterProvider(metric_readers=[reader], resource=resource).get_meter("agent_template")
-        instruments = create_instruments(meter)
+        meter_provider = MeterProvider(metric_readers=[reader], resource=resource)
+        instruments = create_instruments(meter_provider.get_meter("agent_template"))
 
         logger_provider = LoggerProvider(resource=resource)
         logger_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoint)))
-        logger.addHandler(LoggingHandler(level=logging.INFO, logger_provider=logger_provider))
+        handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
+        logger.addHandler(handler)
 
-        return Observability(True, instruments, logger)
+        handle = Observability(True, instruments, logger)
+        _state["handle"] = handle
+        _state["handler"] = handler
+        _state["providers"] = [tracer_provider, meter_provider, logger_provider]
+        return handle
     except Exception:
         # 監控設定失敗絕不影響 main agent
         return Observability(False, {}, logger)
+
+
+def shutdown_observability():
+    """拆除 o11y 管線(移除 log handler、關閉 providers、uninstrument),並重置狀態。供 app 生命週期/測試使用。"""
+    try:
+        if _state["handler"] is not None:
+            get_logger().removeHandler(_state["handler"])
+        for provider in _state["providers"]:
+            try:
+                provider.shutdown()
+            except Exception:
+                pass
+        try:
+            LangChainInstrumentor().uninstrument()
+        except Exception:
+            pass
+    finally:
+        _state["handle"] = None
+        _state["handler"] = None
+        _state["providers"] = []
 
 
 class ObservabilityMiddleware(AgentMiddleware):
@@ -83,7 +115,6 @@ class ObservabilityMiddleware(AgentMiddleware):
         self._model_name = model_name
 
     def wrap_tool_call(self, request, handler):
-        tool_name = request.tool_call["name"]
         start = time.monotonic()
         status = "ok"
         try:
@@ -92,10 +123,9 @@ class ObservabilityMiddleware(AgentMiddleware):
             status = "error"
             raise
         finally:
-            self._record_tool(tool_name, status, time.monotonic() - start)
+            self._record_tool(request, status, time.monotonic() - start)
 
     async def awrap_tool_call(self, request, handler):
-        tool_name = request.tool_call["name"]
         start = time.monotonic()
         status = "ok"
         try:
@@ -104,7 +134,7 @@ class ObservabilityMiddleware(AgentMiddleware):
             status = "error"
             raise
         finally:
-            self._record_tool(tool_name, status, time.monotonic() - start)
+            self._record_tool(request, status, time.monotonic() - start)
 
     def after_model(self, state, runtime):
         if self._instruments:
@@ -113,8 +143,8 @@ class ObservabilityMiddleware(AgentMiddleware):
                 usage = getattr(last, "usage_metadata", None)
                 if usage:
                     tokens = self._instruments["llm_tokens"]
-                    tokens.add(usage.get("input_tokens", 0), {"type": "input", "model": self._model_name or ""})
-                    tokens.add(usage.get("output_tokens", 0), {"type": "output", "model": self._model_name or ""})
+                    tokens.add(usage.get("input_tokens", 0), {"type": "prompt", "model": self._model_name or ""})
+                    tokens.add(usage.get("output_tokens", 0), {"type": "completion", "model": self._model_name or ""})
             except Exception:
                 pass
         return None
@@ -128,10 +158,11 @@ class ObservabilityMiddleware(AgentMiddleware):
                 pass
         return None
 
-    def _record_tool(self, tool_name, status, duration):
+    def _record_tool(self, request, status, duration):
         if not self._instruments:
             return
         try:
+            tool_name = request.tool_call["name"]
             self._instruments["tool_calls"].add(1, {"tool": tool_name, "status": status})
             self._instruments["tool_duration"].record(duration, {"tool": tool_name})
             self._log("tool_call", tool=tool_name, status=status)
