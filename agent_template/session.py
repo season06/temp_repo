@@ -15,3 +15,9 @@ def is_session_stop(message):
         if isinstance(meta, dict) and meta.get("status") == SESSION_STOP:
             return True
     return False
+
+
+def make_session_stop_metadata():
+    """建構帶 session_stop 狀態的 metadata dict。
+    與 is_session_stop 共居;團隊敲定欄位/結構後,讀寫兩側一併在此檔更新。"""
+    return {"status": SESSION_STOP}

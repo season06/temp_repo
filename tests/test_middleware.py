@@ -160,3 +160,34 @@ def test_integration_tool_result_session_stop_halts_before_next_llm():
     out = agent.invoke({"messages": [("user", "go")]})
     contents = [getattr(m, "content", None) for m in out["messages"]]
     assert "should-not-reach" not in contents
+
+
+def test_before_model_halts_on_tool_session_stop():
+    from langchain_core.messages import ToolMessage as _TM
+    mw = HookMiddleware([])
+    stop_tool = _TM(content="x", tool_call_id="c1", response_metadata={"status": "session_stop"})
+    state = {"messages": [HumanMessage(content="hi"), stop_tool]}
+    assert mw.before_model(state, None) == {"jump_to": "end"}
+
+
+def test_integration_tool_native_session_stop_halts_with_no_hooks():
+    from langchain_core.tools import tool
+    from langchain_core.messages import ToolMessage as _TM
+    from tests.fakes import FakeToolModel
+
+    @tool
+    def stopper(x: str) -> str:
+        """returns a session_stop-tagged ToolMessage"""
+        return _TM(content="stop", tool_call_id="c1", name="stopper",
+                   response_metadata={"status": "session_stop"})
+
+    model = FakeToolModel(scripted=[
+        AIMessage(content="", tool_calls=[{"name": "stopper", "args": {"x": "hi"}, "id": "c1"}]),
+        AIMessage(content="should-not-reach"),
+    ])
+    agent = create_deep_agent(model=model, tools=[stopper], system_prompt="x",
+                              middleware=[HookMiddleware([])])
+    out = agent.invoke({"messages": [("user", "go")]})
+    contents = [getattr(m, "content", None) for m in out["messages"]]
+    assert "should-not-reach" not in contents
+    assert out["messages"][-1].response_metadata.get("status") == "session_stop"

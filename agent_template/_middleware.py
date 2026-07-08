@@ -2,7 +2,7 @@ from langchain.agents.middleware import AgentMiddleware, hook_config
 from langchain_core.messages import ToolMessage
 
 from .hooks import HookContext, StopRound
-from .session import is_session_stop, SESSION_STOP
+from .session import is_session_stop, make_session_stop_metadata
 
 
 class HookMiddleware(AgentMiddleware):
@@ -18,6 +18,9 @@ class HookMiddleware(AgentMiddleware):
         messages = state["messages"]
         last = messages[-1] if messages else None
         # tool/mcp 來源的 session_stop 在此被捕捉（tool 之後、下一次 LLM 之前）
+        # MVP 限制:僅檢查最後一則訊息。單一 tool call 下必為正確;
+        # 若 LLM 產生「平行 tool calls」且非最後一個回 session_stop,此處會漏接。
+        # 待 P3 接真實 MCP、確有平行 tool 時再處理(掃描尾端附加訊息)。
         if is_session_stop(last):
             return {"jump_to": "end"}
         context = HookContext(phase="before_llm", messages=messages)
@@ -31,6 +34,7 @@ class HookMiddleware(AgentMiddleware):
         messages = state["messages"]
         last = messages[-1] if messages else None
         # LLM 來源的 session_stop
+        # 見 before_model 的 MVP 限制註解(僅檢查最後一則）。
         if is_session_stop(last):
             return {"jump_to": "end"}
         context = HookContext(phase="after_llm", messages=messages, result=last)
@@ -70,5 +74,5 @@ class HookMiddleware(AgentMiddleware):
             content=content,
             tool_call_id=tool_call["id"],
             name=tool_call["name"],
-            response_metadata={"status": SESSION_STOP},
+            response_metadata=make_session_stop_metadata(),
         )
