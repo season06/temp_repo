@@ -14,10 +14,10 @@ def _build_llm(config):
     )
 
 
-def build_agent(config, hooks=None, tools=None, observability=None):
+def build_agent(config, hooks=None, tools=None, observability=None, model=None):
     """建構並回傳原生 DeepAgent 物件（執行期回歸原生,無包裝）。
-    hooks: Hook 清單;tools: 額外 tools;observability: 啟用時追加 ObservabilityMiddleware。"""
-    llm = _build_llm(config)
+    model: 若提供則直接使用(自帶已設定模型),否則由 config 建 ChatOpenAI。"""
+    llm = model if model is not None else _build_llm(config)
     middleware = [HookMiddleware(hooks)] if hooks else []
     if observability is not None and observability.enabled:
         middleware.append(ObservabilityMiddleware(observability.instruments, observability.logger, config.model))

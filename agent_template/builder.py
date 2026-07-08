@@ -6,10 +6,11 @@ from .skills import MockSkillRegistry, skill_to_tool
 class AgentBuilder:
     """累加式建構器:add_mcp / add_skill / add_hook,最後 build() 回傳原生 agent。"""
 
-    def __init__(self, config, skill_registry=None, observability=None):
+    def __init__(self, config, skill_registry=None, observability=None, model=None):
         self._config = config
         self._registry = skill_registry or MockSkillRegistry()
         self._observability = observability
+        self._model = model
         self._mcp_connections = {}
         self._skill_ids = []
         self._hooks = []
@@ -32,4 +33,4 @@ class AgentBuilder:
         tools = list(load_mcp_tools(self._mcp_connections))
         for skill_id in self._skill_ids:
             tools.append(skill_to_tool(self._registry.get(skill_id)))
-        return build_agent(self._config, hooks=self._hooks, tools=tools, observability=self._observability)
+        return build_agent(self._config, hooks=self._hooks, tools=tools, observability=self._observability, model=self._model)

@@ -125,3 +125,23 @@ def test_build_agent_no_observability_middleware_when_disabled(monkeypatch):
 
     factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"), observability=_ObsOff())
     assert not any(isinstance(m, ObservabilityMiddleware) for m in calls["middleware"])
+
+
+def test_build_agent_uses_injected_model_bypassing_chatopenai(monkeypatch):
+    calls = {}
+
+    def boom(**k):
+        raise AssertionError("ChatOpenAI must not be built when model is injected")
+
+    monkeypatch.setattr(factory, "ChatOpenAI", boom)
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+    factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"), model="INJECTED")
+    assert calls["model"] == "INJECTED"
+
+
+def test_build_agent_builds_llm_when_no_model(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+    factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"))
+    assert calls["model"] == "LLM"

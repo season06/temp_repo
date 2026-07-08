@@ -26,7 +26,7 @@ def test_build_combines_mcp_and_skill_tools(monkeypatch):
     monkeypatch.setattr(bmod, "load_mcp_tools", lambda conns: ["MCP_TOOL"] if conns else [])
     captured = {}
     monkeypatch.setattr(bmod, "build_agent",
-                        lambda config, hooks, tools, observability=None: captured.update(hooks=hooks, tools=tools) or "AGENT")
+                        lambda config, hooks, tools, observability=None, model=None: captured.update(hooks=hooks, tools=tools) or "AGENT")
     reg = MockSkillRegistry({"greet": Skill("greet", "d", "hi")})
     b = AgentBuilder(_cfg(), skill_registry=reg)
     agent = b.add_mcp("s1", {"transport": "stdio"}).add_skill("greet").build()
@@ -55,7 +55,7 @@ def test_multi_mount_accumulates(monkeypatch):
     monkeypatch.setattr(bmod, "load_mcp_tools", lambda conns: [f"MCP:{name}" for name in conns])
     captured = {}
     monkeypatch.setattr(bmod, "build_agent",
-                        lambda config, hooks, tools, observability=None: captured.update(tools=tools) or "AGENT")
+                        lambda config, hooks, tools, observability=None, model=None: captured.update(tools=tools) or "AGENT")
     reg = MockSkillRegistry({"a": Skill("a", "d", "x"), "b": Skill("b", "d", "y")})
     b = AgentBuilder(_cfg(), skill_registry=reg)
     b.add_mcp("s1", {"transport": "stdio"}).add_mcp("s2", {"transport": "stdio"})
@@ -77,7 +77,7 @@ def test_builder_passes_observability_to_build_agent(monkeypatch):
     captured = {}
     monkeypatch.setattr(bmod, "load_mcp_tools", lambda conns: [])
     monkeypatch.setattr(bmod, "build_agent",
-                        lambda config, hooks, tools, observability=None: captured.update(obs=observability) or "AGENT")
+                        lambda config, hooks, tools, observability=None, model=None: captured.update(obs=observability) or "AGENT")
 
     class _Obs:
         enabled = True
@@ -88,3 +88,12 @@ def test_builder_passes_observability_to_build_agent(monkeypatch):
     b = AgentBuilder(_cfg(), observability=obs)
     b.build()
     assert captured["obs"] is obs
+
+
+def test_builder_passes_injected_model(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(bmod, "load_mcp_tools", lambda conns: [])
+    monkeypatch.setattr(bmod, "build_agent",
+                        lambda config, hooks, tools, observability=None, model=None: captured.update(model=model) or "AGENT")
+    AgentBuilder(_cfg(), model="FAKE").build()
+    assert captured["model"] == "FAKE"
