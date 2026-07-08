@@ -11,6 +11,7 @@ def load_mcp_tools(connections):
       http:  {"transport": "streamable_http", "url": "http://host/mcp"}
     回傳 langchain BaseTool 清單;connections 為空則回傳 []。
     MCP tool 為 async-only（呼叫端需用 ainvoke）。
+    注意:MCP tool 為 async-only;帶有 MCP tool 的 agent 必須以 ainvoke/astream 執行(同步 invoke 會在該 tool 上 NotImplementedError)。
     """
     if not connections:
         return []

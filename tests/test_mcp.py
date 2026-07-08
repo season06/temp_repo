@@ -35,3 +35,21 @@ def test_load_real_stdio_server():
     # MCP tools are async-only; invoke via ainvoke
     result = asyncio.run(echo.ainvoke({"text": "hi"}))
     assert "echo:hi" in str(result)
+
+
+def test_agent_ainvoke_runs_real_mcp_tool():
+    from langchain_core.messages import AIMessage
+    from deepagents import create_deep_agent
+    from tests.fakes import FakeToolModel
+
+    server = os.path.join(os.path.dirname(__file__), "mcp_server.py")
+    tools = load_mcp_tools({"t": {"transport": "stdio", "command": sys.executable, "args": [server]}})
+    model = FakeToolModel(scripted=[
+        AIMessage(content="", tool_calls=[{"name": "echo", "args": {"text": "hi"}, "id": "c1"}]),
+        AIMessage(content="done"),
+    ])
+    agent = create_deep_agent(model=model, tools=tools, system_prompt="x")
+    out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}))
+    contents = [str(getattr(m, "content", None)) for m in out["messages"]]
+    assert any("echo:hi" in c for c in contents)  # MCP tool actually executed under ainvoke
+    assert out["messages"][-1].content == "done"
