@@ -4,80 +4,107 @@ import sys
 import agent_template.core.builder as bmod
 import agent_template.core.factory as factory
 from agent_template.core import AgentBuilder
-from agent_template.config import AgentConfig
+from agent_template.config import Config, LLMConfig, AgentSettings, SkillsConfig, McpsConfig, LocalSkill, LocalMcp
 from agent_template.hooks import Hook
-from agent_template.tools import Skill, MockSkillRegistry
+
+SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_fixture.py")
+MCP_SERVER = os.path.join(os.path.dirname(__file__), "mcp_server.py")
 
 
-def _cfg():
-    return AgentConfig(api_key="k", base_url="b", model="m")
+def _cfg(skills=None, mcps=None):
+    return Config(
+        llm=LLMConfig(api_key="k", base_url="b", model="m"),
+        agent=AgentSettings(system_prompt="x"),
+        skills=SkillsConfig(local=skills or []),
+        mcps=McpsConfig(local=mcps or []),
+    )
 
 
 def test_add_methods_chain_and_accumulate():
     b = AgentBuilder(_cfg())
-    r = b.add_mcp("s1", {"transport": "stdio"}).add_skill("greet").add_hook(Hook())
+    r = (b.add_mcp("s1", "stdio", "./a.py")
+          .add_skill("greet", SKILL_FIXTURE)
+          .add_hook(Hook()))
     assert r is b
-    assert b._mcp_connections == {"s1": {"transport": "stdio"}}
-    assert b._skill_ids == ["greet"]
+    assert b._mcps == [LocalMcp(name="s1", transport="stdio", path="./a.py", func=[])]
+    assert b._skills == [LocalSkill(name="greet", path=SKILL_FIXTURE)]
     assert len(b._hooks) == 1
 
 
+def test_builder_seeds_from_config_then_appends():
+    cfg = _cfg(
+        skills=[LocalSkill(name="from_cfg", path="./s.py")],
+        mcps=[LocalMcp(name="cfg_mcp", transport="stdio", path="./m.py")],
+    )
+    b = AgentBuilder(cfg)
+    # 起始清單來自 config
+    assert [s.name for s in b._skills] == ["from_cfg"]
+    assert [m.name for m in b._mcps] == ["cfg_mcp"]
+    # add_* 追加在 config 之後
+    b.add_skill("added", "./s2.py").add_mcp("added_mcp", "stdio", "./m2.py")
+    assert [s.name for s in b._skills] == ["from_cfg", "added"]
+    assert [m.name for m in b._mcps] == ["cfg_mcp", "added_mcp"]
+    # 不汙染 config 本身
+    assert [s.name for s in cfg.skills.local] == ["from_cfg"]
+    assert [m.name for m in cfg.mcps.local] == ["cfg_mcp"]
+
+
 def test_build_combines_mcp_and_skill_tools(monkeypatch):
-    monkeypatch.setattr(bmod, "load_mcp_tools", lambda conns: ["MCP_TOOL"] if conns else [])
+    monkeypatch.setattr(bmod, "load_configured_mcp_tools", lambda mcps: ["MCP:" + m.name for m in mcps])
+    monkeypatch.setattr(bmod, "load_skill_tools", lambda skills: ["SKILL:" + s.name for s in skills])
     captured = {}
-    monkeypatch.setattr(bmod, "build_agent",
-                        lambda config, hooks, tools, observability=None, model=None: captured.update(hooks=hooks, tools=tools) or "AGENT")
-    reg = MockSkillRegistry({"greet": Skill("greet", "d", "hi")})
-    b = AgentBuilder(_cfg(), skill_registry=reg)
-    agent = b.add_mcp("s1", {"transport": "stdio"}).add_skill("greet").build()
+    monkeypatch.setattr(bmod, "get_provider_builder",
+                        lambda config, hooks, tools, observability=None: captured.update(tools=tools) or "AGENT")
+    b = AgentBuilder(_cfg())
+    agent = b.add_mcp("s1", "stdio", "./a.py").add_skill("greet", "./g.py").build()
     assert agent == "AGENT"
-    tools = captured["tools"]
-    assert "MCP_TOOL" in tools
-    assert any(getattr(t, "name", None) == "greet" for t in tools)
+    assert captured["tools"] == ["MCP:s1", "SKILL:greet"]
 
 
 def test_build_wires_real_mcp_and_skill_tools_into_create_deep_agent(monkeypatch):
     captured = {}
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: captured.update(k) or "AGENT")
-    server = os.path.join(os.path.dirname(__file__), "mcp_server.py")
-    reg = MockSkillRegistry({"greet": Skill("greet", "d", "hi from skill")})
-    b = AgentBuilder(_cfg(), skill_registry=reg)
-    b.add_mcp("test", {"transport": "stdio", "command": sys.executable, "args": [server]}).add_skill("greet")
+    b = AgentBuilder(_cfg())
+    b.add_mcp("test", "stdio", MCP_SERVER).add_skill("greet", SKILL_FIXTURE)
     agent = b.build()
     assert agent == "AGENT"
     names = [getattr(t, "name", None) for t in captured["tools"]]
     assert "echo" in names   # real MCP tool loaded from the subprocess server
-    assert "greet" in names  # skill tool
+    assert "greet" in names  # skill tool loaded from the fixture file
 
 
-def test_multi_mount_accumulates(monkeypatch):
-    monkeypatch.setattr(bmod, "load_mcp_tools", lambda conns: [f"MCP:{name}" for name in conns])
+def test_config_mcps_and_skills_are_loaded_at_build(monkeypatch):
     captured = {}
-    monkeypatch.setattr(bmod, "build_agent",
-                        lambda config, hooks, tools, observability=None, model=None: captured.update(tools=tools) or "AGENT")
-    reg = MockSkillRegistry({"a": Skill("a", "d", "x"), "b": Skill("b", "d", "y")})
-    b = AgentBuilder(_cfg(), skill_registry=reg)
-    b.add_mcp("s1", {"transport": "stdio"}).add_mcp("s2", {"transport": "stdio"})
-    b.add_skill("a").add_skill("b")
-    b.build()
-    tools = captured["tools"]
-    assert "MCP:s1" in tools and "MCP:s2" in tools
-    skill_names = [getattr(t, "name", None) for t in tools]
-    assert skill_names.count("a") == 1 and skill_names.count("b") == 1
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: captured.update(k) or "AGENT")
+    cfg = _cfg(
+        skills=[LocalSkill(name="greet", path=SKILL_FIXTURE)],
+        mcps=[LocalMcp(name="test", transport="stdio", path=MCP_SERVER)],
+    )
+    AgentBuilder(cfg).build()
+    names = [getattr(t, "name", None) for t in captured["tools"]]
+    assert "echo" in names and "greet" in names  # both came straight from config
 
 
-def test_add_mcp_same_name_overwrites():
+def test_add_mcp_func_filter(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: captured.update(k) or "AGENT")
     b = AgentBuilder(_cfg())
-    b.add_mcp("s", {"transport": "stdio", "command": "a"}).add_mcp("s", {"transport": "stdio", "command": "b"})
-    assert b._mcp_connections == {"s": {"transport": "stdio", "command": "b"}}
+    # server exposes "echo"; ask for a non-existent func -> filtered out
+    b.add_mcp("test", "stdio", MCP_SERVER, func=["nonexistent"])
+    b.build()
+    names = [getattr(t, "name", None) for t in captured["tools"]]
+    assert "echo" not in names
 
 
 def test_builder_passes_observability_to_build_agent(monkeypatch):
     captured = {}
-    monkeypatch.setattr(bmod, "load_mcp_tools", lambda conns: [])
-    monkeypatch.setattr(bmod, "build_agent",
-                        lambda config, hooks, tools, observability=None, model=None: captured.update(obs=observability) or "AGENT")
+    monkeypatch.setattr(bmod, "load_configured_mcp_tools", lambda mcps: [])
+    monkeypatch.setattr(bmod, "load_skill_tools", lambda skills: [])
+    monkeypatch.setattr(bmod, "get_provider_builder",
+                        lambda config, hooks, tools, observability=None: captured.update(obs=observability) or "AGENT")
 
     class _Obs:
         enabled = True
@@ -85,15 +112,28 @@ def test_builder_passes_observability_to_build_agent(monkeypatch):
         logger = None
 
     obs = _Obs()
-    b = AgentBuilder(_cfg(), observability=obs)
-    b.build()
+    AgentBuilder(_cfg(), observability=obs).build()
     assert captured["obs"] is obs
 
 
-def test_builder_passes_injected_model(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(bmod, "load_mcp_tools", lambda conns: [])
-    monkeypatch.setattr(bmod, "build_agent",
-                        lambda config, hooks, tools, observability=None, model=None: captured.update(model=model) or "AGENT")
-    AgentBuilder(_cfg(), model="FAKE").build()
-    assert captured["model"] == "FAKE"
+def test_build_delegates_to_build_agent_with_full_config(monkeypatch):
+    monkeypatch.setattr(bmod, "load_configured_mcp_tools", lambda mcps: [])
+    monkeypatch.setattr(bmod, "load_skill_tools", lambda skills: [])
+    seen = {}
+    monkeypatch.setattr(bmod, "get_provider_builder",
+                        lambda config, hooks, tools, observability=None: seen.update(provider=config.agent.provider) or "AGENT")
+    cfg = _cfg()
+    cfg.agent.provider = "my-framework"
+    AgentBuilder(cfg).build()
+    # build 委派給單一分派點 get_provider_builder,由它依 config.agent.provider 選具體 builder
+    assert seen["provider"] == "my-framework"
+
+
+def test_build_unknown_provider_raises():
+    import pytest
+    cfg = _cfg()
+    cfg.agent.provider = "nope"
+    with pytest.raises(ValueError, match="unsupported provider"):
+        AgentBuilder(cfg).build()
+
+

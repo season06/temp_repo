@@ -58,13 +58,13 @@ def setup_observability(config: Any) -> Observability:
     """建立 trace/metrics/log 管線並回傳 handle。o11y 關閉或設定失敗一律回傳 degraded handle,絕不 raise。
     冪等:重複呼叫回傳同一個快取的 handle,避免疊加 handler / 重複建立 providers。"""
     logger = get_logger()
-    if not config.o11y_enabled:
+    if not config.enabled:
         return Observability(False, {}, logger)
     if _state["handle"] is not None:
         return _state["handle"]  # idempotent: avoid stacked handlers / duplicate providers
     try:
         resource = build_resource(config)
-        endpoint = config.otel_endpoint
+        endpoint = config.endpoint
         tracer_provider = TracerProvider(resource=resource, sampler=TraceIdRatioBased(config.sampling_ratio))
         tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
         LangChainInstrumentor().instrument(tracer_provider=tracer_provider)

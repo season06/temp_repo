@@ -1,42 +1,35 @@
+"""Skill 載入:把 config 宣告的本地 skill(一個 @tool python 檔)載入成 langchain tools。
+
+deepagent 使用 tool 的方式就是把 langchain BaseTool 餵給 create_deep_agent(tools=...)。
+一個 skill 檔即一個(或多個)`@tool` 函式;載入時收集檔內所有 BaseTool 物件。
+"""
+
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import BaseTool
 
 if TYPE_CHECKING:
-    from langchain_core.tools import BaseTool
+    from ..config import LocalSkill
 
 
-class Skill:
-    """從 skill-registry 取得的 skill（MVP mock 形狀:名稱 + 描述 + 內容）。"""
-
-    def __init__(self, name: str, description: str, content: str) -> None:
-        self.name: str = name
-        self.description: str = description
-        self.content: str = content
-
-
-class SkillRegistry:
-    """skill 來源介面。正式 registry 由團隊敲定後實作;MVP 用 MockSkillRegistry。"""
-
-    def get(self, skill_id: str) -> Skill:
-        raise NotImplementedError
+def load_skill_file(path: str) -> list[BaseTool]:
+    """匯入單一 skill python 檔,回傳檔內所有 langchain BaseTool(即 @tool 產生的物件)。"""
+    module_name = "_agent_template_skill_" + Path(path).stem
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load skill file: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return [obj for obj in vars(module).values() if isinstance(obj, BaseTool)]
 
 
-class MockSkillRegistry(SkillRegistry):
-    def __init__(self, skills: dict[str, Skill] | None = None) -> None:
-        # skills: dict[skill_id -> Skill]
-        self._skills: dict[str, Skill] = skills or {}
-
-    def get(self, skill_id: str) -> Skill:
-        return self._skills[skill_id]
-
-
-def skill_to_tool(skill: Skill) -> BaseTool:
-    """把一個 Skill 轉成可被 agent 呼叫的 tool（MVP:無參數,回傳 skill.content）。"""
-
-    def _run() -> str:
-        return skill.content
-
-    return StructuredTool.from_function(func=_run, name=skill.name, description=skill.description)
+def load_skill_tools(skills: list[LocalSkill]) -> list[BaseTool]:
+    """從 config 的 LocalSkill 清單載入所有 skill tools。"""
+    tools: list[BaseTool] = []
+    for skill in skills:
+        tools.extend(load_skill_file(skill.path))
+    return tools

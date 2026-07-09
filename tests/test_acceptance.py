@@ -1,15 +1,14 @@
 import asyncio
 import os
-import sys
 
 import httpx
 from langchain_core.messages import AIMessage
 
-from agent_template.config import AgentConfig
+import agent_template.core.factory as factory
+from agent_template.config import Config, LLMConfig, AgentSettings
 from agent_template.core import AgentBuilder
 from agent_template.hooks import Hook, StopRound
 from agent_template.auth import AuthHook
-from agent_template.tools import Skill, MockSkillRegistry
 from agent_template.observability import ObservabilityMiddleware, create_instruments
 from agent_template.hooks import HookMiddleware
 from agent_template.a2a import build_agent_card, build_a2a_app
@@ -23,8 +22,12 @@ from deepagents import create_deep_agent
 BASE = "http://test"
 
 
+SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_fixture.py")
+
+
 def _cfg():
-    return AgentConfig(api_key="k", base_url="http://x/v1", model="m", system_prompt="x")
+    return Config(llm=LLMConfig(api_key="k", base_url="http://x/v1", model="m"),
+                  agent=AgentSettings(system_prompt="x"))
 
 
 class _Allow:
@@ -49,30 +52,32 @@ def _metric_totals(reader):
 
 
 # req.md 驗收點 1:build + invoke + stream
-def test_acceptance_build_invoke_and_stream():
+def test_acceptance_build_invoke_and_stream(monkeypatch):
     model = FakeToolModel(scripted=[AIMessage(content="hello-response")])
-    agent = AgentBuilder(_cfg(), model=model).build()
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: model)   # config.llm 建出 fake model
+    agent = AgentBuilder(_cfg()).build()
     out = agent.invoke({"messages": [("user", "hi")]})
     assert out["messages"][-1].content == "hello-response"
 
     stream_model = FakeToolModel(scripted=[AIMessage(content="streamed")])
-    stream_agent = AgentBuilder(_cfg(), model=stream_model).build()
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: stream_model)
+    stream_agent = AgentBuilder(_cfg()).build()
     chunks = list(stream_agent.stream({"messages": [("user", "hi")]}))
     assert len(chunks) > 0
 
 
-# req.md 驗收點 2:add_skill(mock) + add_mcp(stdio) 被 agent 呼叫
-def test_acceptance_mcp_and_skill_tools_are_called():
+# req.md 驗收點 2:add_skill(file) + add_mcp(stdio) 被 agent 呼叫
+def test_acceptance_mcp_and_skill_tools_are_called(monkeypatch):
     server = os.path.join(os.path.dirname(__file__), "mcp_server.py")
-    reg = MockSkillRegistry({"greet": Skill("greet", "greeting", "hi-from-skill")})
     model = FakeToolModel(scripted=[
         AIMessage(content="", tool_calls=[{"name": "echo", "args": {"text": "x"}, "id": "c1"}]),
         AIMessage(content="", tool_calls=[{"name": "greet", "args": {}, "id": "c2"}]),
         AIMessage(content="done"),
     ])
-    agent = (AgentBuilder(_cfg(), skill_registry=reg, model=model)
-             .add_mcp("t", {"transport": "stdio", "command": sys.executable, "args": [server]})
-             .add_skill("greet")
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: model)
+    agent = (AgentBuilder(_cfg())
+             .add_mcp("t", "stdio", server)
+             .add_skill("greet", SKILL_FIXTURE)
              .build())
     out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}))
     contents = [str(getattr(m, "content", None)) for m in out["messages"]]

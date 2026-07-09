@@ -1,0 +1,35 @@
+# ============================
+# Agent Configuraion
+# ============================
+
+agent:
+  provider: deepagent
+  system_prompt: "your are a helpful agent"
+
+# ============================
+# Tools Configuraion
+# ============================
+
+skills__local:
+  - name: make_a_joke
+    path: "./skills/make_a_joke.py"
+  - name: translate
+    path: "./skills/translate.py"
+
+skills__remote:
+  registry_url: ""
+  name: []
+
+mcps__local:
+  - name: test-func
+    transport: stdio
+    path: "./mcp/local_server.py"  # like @tool
+    func: ["get"]
+  - name: test-server
+    transport: streamable_http
+    path: "http://localhost:9222/mcp"  # run server
+    func: ["get"]
+
+mcps__remote:
+  registry_url: ""
+  name: []

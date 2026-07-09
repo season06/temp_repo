@@ -1,5 +1,9 @@
 from agent_template.core import factory
-from agent_template.config import AgentConfig
+from agent_template.config import Config, LLMConfig, AgentSettings
+
+
+def _cfg(system_prompt=None, **llm):
+    return Config(llm=LLMConfig(**llm), agent=AgentSettings(system_prompt=system_prompt))
 
 
 def test_build_llm_passes_openai_compatible_params(monkeypatch):
@@ -10,8 +14,8 @@ def test_build_llm_passes_openai_compatible_params(monkeypatch):
         return "LLM"
 
     monkeypatch.setattr(factory, "ChatOpenAI", fake_chat)
-    cfg = AgentConfig(api_key="k", base_url="http://localhost/v1", model="qwen", temperature=0.2)
-    llm = factory._build_llm(cfg)
+    cfg = _cfg(api_key="k", base_url="http://localhost/v1", model="qwen", temperature=0.2)
+    llm = factory._build_llm(cfg.llm)
     assert llm == "LLM"
     assert captured["api_key"] == "k"
     assert captured["base_url"] == "http://localhost/v1"
@@ -29,8 +33,8 @@ def test_build_agent_wires_model_and_system_prompt(monkeypatch):
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
     monkeypatch.setattr(factory, "create_deep_agent", fake_create_deep_agent)
 
-    cfg = AgentConfig(api_key="k", base_url="b", model="m", system_prompt="SP")
-    agent = factory.build_agent(cfg)
+    cfg = _cfg(system_prompt="SP", api_key="k", base_url="b", model="m")
+    agent = factory.get_provider_builder(cfg)
 
     assert agent == "AGENT"
     assert calls["model"] == "LLM"
@@ -38,8 +42,8 @@ def test_build_agent_wires_model_and_system_prompt(monkeypatch):
 
 
 def test_build_agent_returns_native_object_with_invoke_and_stream():
-    cfg = AgentConfig(api_key="dummy", base_url="http://localhost:9/v1", model="m")
-    agent = factory.build_agent(cfg)
+    cfg = _cfg(api_key="dummy", base_url="http://localhost:9/v1", model="m")
+    agent = factory.get_provider_builder(cfg)
     assert agent is not None
     assert callable(getattr(agent, "invoke", None))
     assert callable(getattr(agent, "stream", None))
@@ -56,8 +60,7 @@ def test_build_agent_wires_hook_middleware_when_hooks_given(monkeypatch):
     monkeypatch.setattr(factory, "create_deep_agent", fake_create_deep_agent)
 
     from agent_template.hooks import Hook
-    cfg = AgentConfig(api_key="k", base_url="b", model="m")
-    factory.build_agent(cfg, hooks=[Hook()])
+    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"), hooks=[Hook()])
 
     mw = calls["middleware"]
     assert len(mw) == 1
@@ -70,8 +73,7 @@ def test_build_agent_no_hooks_passes_empty_middleware(monkeypatch):
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
 
-    cfg = AgentConfig(api_key="k", base_url="b", model="m")
-    factory.build_agent(cfg)
+    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"))
     assert calls["middleware"] == []
 
 
@@ -79,8 +81,7 @@ def test_build_agent_passes_tools(monkeypatch):
     calls = {}
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
-    cfg = AgentConfig(api_key="k", base_url="b", model="m")
-    factory.build_agent(cfg, tools=["T1", "T2"])
+    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"), tools=["T1", "T2"])
     assert calls["tools"] == ["T1", "T2"]
 
 
@@ -88,7 +89,7 @@ def test_build_agent_defaults_tools_to_empty(monkeypatch):
     calls = {}
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
-    factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"))
+    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"))
     assert calls["tools"] == []
 
 
@@ -105,8 +106,7 @@ def test_build_agent_appends_observability_middleware_when_enabled(monkeypatch):
         instruments = {"tool_calls": None, "tool_duration": None, "llm_tokens": None, "agent_runs": None}
         logger = None
 
-    cfg = AgentConfig(api_key="k", base_url="b", model="m")
-    factory.build_agent(cfg, hooks=[Hook()], observability=_Obs())
+    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"), hooks=[Hook()], observability=_Obs())
     mw = calls["middleware"]
     assert any(isinstance(m, ObservabilityMiddleware) for m in mw)
 
@@ -123,25 +123,35 @@ def test_build_agent_no_observability_middleware_when_disabled(monkeypatch):
         instruments = {}
         logger = None
 
-    factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"), observability=_ObsOff())
+    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"), observability=_ObsOff())
     assert not any(isinstance(m, ObservabilityMiddleware) for m in calls["middleware"])
 
 
-def test_build_agent_uses_injected_model_bypassing_chatopenai(monkeypatch):
-    calls = {}
-
-    def boom(**k):
-        raise AssertionError("ChatOpenAI must not be built when model is injected")
-
-    monkeypatch.setattr(factory, "ChatOpenAI", boom)
-    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
-    factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"), model="INJECTED")
-    assert calls["model"] == "INJECTED"
-
-
-def test_build_agent_builds_llm_when_no_model(monkeypatch):
+def test_build_agent_builds_llm_from_config(monkeypatch):
     calls = {}
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
-    factory.build_agent(AgentConfig(api_key="k", base_url="b", model="m"))
+    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"))
     assert calls["model"] == "LLM"
+
+
+def test_default_provider_is_deepagent():
+    assert factory._PROVIDER_BUILDERS["deepagent"] is factory.build_deepagent
+
+
+def test_get_provider_builder_unknown_raises():
+    import pytest
+    cfg = _cfg(api_key="k", base_url="b", model="m")
+    cfg.agent.provider = "nope"
+    with pytest.raises(ValueError, match="unsupported provider"):
+        factory.get_provider_builder(cfg)
+
+
+def test_build_agent_dispatches_to_registered_provider(monkeypatch):
+    captured = {}
+    monkeypatch.setitem(factory._PROVIDER_BUILDERS, "custom",
+                        lambda config, hooks, tools, observability=None: captured.update(hit=True) or "CUSTOM")
+    cfg = _cfg(api_key="k", base_url="b", model="m")
+    cfg.agent.provider = "custom"
+    assert factory.get_provider_builder(cfg) == "CUSTOM"
+    assert captured["hit"] is True

@@ -1,7 +1,7 @@
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-from agent_template.config import Config
+from agent_template.config import ObservabilityConfig
 from agent_template.observability import otel as obs_mod
 from agent_template.observability import build_resource, create_instruments, setup_observability, shutdown_observability
 
@@ -12,7 +12,7 @@ def _in_memory_meter():
 
 
 def test_build_resource_carries_attributes():
-    cfg = Config(cid="proj-9", agent_version="1.2.3", service_name="svc")
+    cfg = ObservabilityConfig(cid="proj-9", agent_version="1.2.3", service_name="svc")
     resource = build_resource(cfg)
     assert resource.attributes.get("service.name") == "svc"
     assert resource.attributes.get("cid") == "proj-9"
@@ -26,7 +26,7 @@ def test_create_instruments_returns_four_named():
 
 
 def test_setup_disabled_returns_noop_handle():
-    handle = setup_observability(Config(o11y_enabled=False))
+    handle = setup_observability(ObservabilityConfig(enabled=False))
     assert handle.enabled is False
     assert handle.instruments == {}
 
@@ -37,12 +37,12 @@ def test_setup_failure_is_swallowed(monkeypatch):
         raise RuntimeError("otel broken")
 
     monkeypatch.setattr(obs_mod, "TracerProvider", boom)
-    handle = setup_observability(Config(o11y_enabled=True, otel_endpoint="http://localhost:4318"))
+    handle = setup_observability(ObservabilityConfig(enabled=True, endpoint="http://localhost:4318"))
     assert handle.enabled is False
 
 
 def test_setup_enabled_builds_instruments_then_uninstrument():
-    handle = setup_observability(Config(o11y_enabled=True, otel_endpoint="http://localhost:4318"))
+    handle = setup_observability(ObservabilityConfig(enabled=True, endpoint="http://localhost:4318"))
     try:
         assert handle.enabled is True
         assert set(handle.instruments.keys()) == {"tool_calls", "tool_duration", "llm_tokens", "agent_runs"}
@@ -131,7 +131,7 @@ def test_disabled_instruments_noop():
 
 def test_setup_is_idempotent_and_shutdown_resets():
     from agent_template.observability import setup_observability, shutdown_observability, get_logger
-    cfg = Config(o11y_enabled=True, otel_endpoint="http://localhost:4318")
+    cfg = ObservabilityConfig(enabled=True, endpoint="http://localhost:4318")
     logger = get_logger()
     before = len(logger.handlers)
     h1 = setup_observability(cfg)

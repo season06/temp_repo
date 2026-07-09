@@ -1,11 +1,14 @@
 import asyncio
+import os
 
 from langchain_core.messages import AIMessage
 
-from agent_template.config import AgentConfig
-from agent_template.tools import Skill, MockSkillRegistry
-from examples.example_agent import build_example_agent
+import agent_template.core.factory as factory
+from agent_template.config import Config, LLMConfig, AgentSettings, SkillsConfig, AuthConfig, LocalSkill
+from examples.agent import build_example_agent
 from tests.fakes import FakeToolModel
+
+SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_fixture.py")
 
 
 class _Allow:
@@ -13,28 +16,32 @@ class _Allow:
         return True
 
 
-def _cfg():
-    return AgentConfig(api_key="k", base_url="http://x/v1", model="m")
+def _cfg(**over):
+    base = dict(llm=LLMConfig(api_key="k", base_url="http://x/v1", model="m"),
+                agent=AgentSettings(system_prompt="x"))
+    base.update(over)
+    return Config(**base)
 
 
-def test_build_example_agent_runs_skill_tool():
-    reg = MockSkillRegistry({"greet": Skill("greet", "greeting", "hi-from-skill")})
+def test_build_example_agent_runs_skill_tool(monkeypatch):
+    cfg = _cfg(skills=SkillsConfig(local=[LocalSkill(name="greet", path=SKILL_FIXTURE)]))
     model = FakeToolModel(scripted=[
         AIMessage(content="", tool_calls=[{"name": "greet", "args": {}, "id": "c1"}]),
         AIMessage(content="done"),
     ])
-    agent = build_example_agent(_cfg(), model=model, skill_ids=["greet"],
-                                skill_registry=reg, auth_client=_Allow())
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: model)   # 讓 config.llm 建出 fake model
+    agent = build_example_agent(cfg, auth_client=_Allow())
     out = asyncio.run(agent.ainvoke({"messages": [("user", "hello")]}))
     contents = [str(getattr(m, "content", None)) for m in out["messages"]]
-    assert any("hi-from-skill" in c for c in contents)  # skill tool executed
+    assert any("hi-from-skill" in c for c in contents)  # skill tool (from config) executed
     assert out["messages"][-1].content == "done"
 
 
-def test_build_example_agent_default_auth_from_runtime_config_builds():
-    from agent_template.config import Config
+def test_build_example_agent_default_auth_from_config_builds(monkeypatch):
+    cfg = _cfg(auth=AuthConfig(endpoint="http://auth/verify"))
     model = FakeToolModel(scripted=[AIMessage(content="ok")])
-    agent = build_example_agent(_cfg(), runtime_config=Config(auth_endpoint="http://auth/verify"), model=model)
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: model)
+    agent = build_example_agent(cfg)
     assert agent is not None
     out = asyncio.run(agent.ainvoke({"messages": [("user", "hi")]}))
     assert out["messages"][-1].content == "ok"

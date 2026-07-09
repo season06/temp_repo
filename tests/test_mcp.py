@@ -2,8 +2,9 @@ import asyncio
 import os
 import sys
 
+from agent_template.config import LocalMcp
 from agent_template.tools import mcp as mcp_mod
-from agent_template.tools import load_mcp_tools
+from agent_template.tools import load_mcp_tools, load_configured_mcp_tools, mcp_to_connection
 
 
 def test_empty_connections_returns_empty():
@@ -35,6 +36,25 @@ def test_load_real_stdio_server():
     # MCP tools are async-only; invoke via ainvoke
     result = asyncio.run(echo.ainvoke({"text": "hi"}))
     assert "echo:hi" in str(result)
+
+
+def test_mcp_to_connection_translates_stdio_and_http():
+    stdio = mcp_to_connection(LocalMcp(name="s", transport="stdio", path="./server.py"))
+    assert stdio["transport"] == "stdio"
+    assert stdio["command"] == sys.executable
+    assert stdio["args"] == ["./server.py"]
+
+    http = mcp_to_connection(LocalMcp(name="s", transport="streamable_http", path="http://h/mcp"))
+    assert http == {"transport": "streamable_http", "url": "http://h/mcp"}
+
+
+def test_load_configured_filters_by_func():
+    server = os.path.join(os.path.dirname(__file__), "mcp_server.py")
+    # server exposes "echo"; func filter keeps only listed names
+    kept = load_configured_mcp_tools([LocalMcp(name="t", transport="stdio", path=server, func=["echo"])])
+    assert [t.name for t in kept] == ["echo"]
+    dropped = load_configured_mcp_tools([LocalMcp(name="t", transport="stdio", path=server, func=["missing"])])
+    assert dropped == []
 
 
 def test_agent_ainvoke_runs_real_mcp_tool():
