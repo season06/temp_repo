@@ -72,7 +72,7 @@ agent_template/
     ├── server.py          #   build_agent_card / AgentA2AExecutor / build_a2a_app
     └── client.py          #   call_agent
 
-examples/example_agent.py  # 串起全部功能的示範
+examples/agent.py          # 串起全部功能的示範
 tests/                     # 單元 + 端到端驗收(tests/test_acceptance.py)
 docs/superpowers/          # 設計規格書 (specs/) 與分階段實作計畫 (plans/)
 ```
@@ -198,7 +198,7 @@ async with httpx.AsyncClient() as hc:
 
 ## Example Agent
 
-`examples/example_agent.py::build_example_agent(config, model=None, observability=None, auth_client=None, extra_hooks=None)` 串起 auth / MCP / skill / observability / hooks 的完整示範(skills/mcps 由 `config` 帶入);`python -m examples.example_agent` 用 `Config.load()` 有真實用法範例。
+`examples/agent.py::build_example_agent(config, observability=None, auth_client=None, extra_hooks=None)` 串起 auth / MCP / skill / observability / hooks 的完整示範(skills/mcps 由 `config` 帶入);`python -m examples.agent` 用 `Config.load()` 有真實用法範例。
 
 ## 測試
 
