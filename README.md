@@ -65,7 +65,7 @@ agent_template/
 │   └── clients.py         #   AuthClient / HttpAuthClient / AuthHook / Async* 版
 ├── tools/                 # Skill 與 MCP 接入
 │   ├── mcp.py             #   load_mcp_tools / load_configured_mcp_tools(config→connection 翻譯)
-│   └── skills.py          #   load_skill_tools(從 @tool python 檔載入)
+│   └── skills.py          #   skill_sources(收集 deepagent 原生 skill 來源路徑)
 ├── observability/         # OpenTelemetry 監控
 │   └── otel.py            #   setup_observability / ObservabilityMiddleware / …
 └── a2a/                   # Agent-to-Agent(標準 a2a-sdk)
@@ -77,7 +77,7 @@ tests/                     # 單元 + 端到端驗收(tests/test_acceptance.py)
 docs/superpowers/          # 設計規格書 (specs/) 與分階段實作計畫 (plans/)
 ```
 
-**匯入位置一覽:** `agent_template.config`(Config/LLMConfig/AgentSettings/SkillsConfig/McpsConfig/ObservabilityConfig/AuthConfig)、`agent_template.core`(get_provider_builder/AgentBuilder/register_provider)、`agent_template.hooks`(Hook/HookMiddleware/…)、`agent_template.auth`(AuthHook/…)、`agent_template.tools`(load_mcp_tools/load_skill_tools/…)、`agent_template.observability`(setup_observability/…)、`agent_template.a2a`(build_a2a_app/call_agent/…)。
+**匯入位置一覽:** `agent_template.config`(Config/LLMConfig/AgentSettings/SkillsConfig/McpsConfig/ObservabilityConfig/AuthConfig)、`agent_template.core`(get_provider_builder/AgentBuilder/register_provider)、`agent_template.hooks`(Hook/HookMiddleware/…)、`agent_template.auth`(AuthHook/…)、`agent_template.tools`(load_mcp_tools/skill_sources/…)、`agent_template.observability`(setup_observability/…)、`agent_template.a2a`(build_a2a_app/call_agent/…)。
 
 ## 核心功能
 
@@ -142,18 +142,18 @@ A2A server 入站用 **async** 版 `AsyncHttpAuthClient`(見下)。`AuthClient` 
 
 ### 4. Skill 與 MCP
 
-skills 與 mcps 直接來自 `config`(`config.yaml` 的 `skills__local` / `mcps__local`);`add_skill` / `add_mcp` 則是在 config 帶入的清單之後**追加**。從 deepagent 的角度,兩者最終都是餵給 `create_deep_agent(tools=...)` 的 langchain tool。
+skills 與 mcps 直接來自 `config`(`config.yaml` 的 `skills__local` / `mcps__local`);`add_skill` / `add_mcp` 則是在 config 帶入的清單之後**追加**。兩者概念不同:**mcp** 最終翻成餵給 `create_deep_agent(tools=...)` 的 langchain tool;**skill** 是 deepagent 原生 skill(SKILL.md),以來源路徑餵給 `create_deep_agent(skills=...)`,由 `SkillsMiddleware` 注入 system prompt,**不是 tool**。
 
 ```python
 config = Config.load("config.yaml", ".env")   # 已含 skills/mcps
 agent = (AgentBuilder(config)
          .add_mcp("extra", "streamable_http", "http://host/mcp")   # 追加一個 MCP server
-         .add_skill("greet", "./skills/greet.py")                  # 追加一個本地 skill 檔
+         .add_skill("greet", "./skills")                           # 追加一個 skill 來源目錄(含 SKILL.md)
          .build())
 ```
 
 - `add_mcp(name, transport, path, func=None)` — `transport` 為 `stdio`(path 為要執行的 `.py`)或 `streamable_http`(path 為 URL);內部翻譯成 `langchain-mcp-adapters` connection。`func` 非空則只保留該 server 內指定名稱的 tool。
-- `add_skill(name, path)` — `path` 指向一個含 `@tool` 的 python 檔;載入時收集檔內所有 langchain tool。
+- `add_skill(name, path)` — `path` 指向一個含 `SKILL.md` 的 skill 來源目錄,直接交給 deepagent 原生 `skills=`(有 skill 時以 `FilesystemBackend` 從磁碟載入);**不轉成 tool**。
 - 遠端 registry(`skills__remote` / `mcps__remote`)MVP 尚未接。
 
 ### 5. Observability

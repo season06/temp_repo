@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from deepagents import create_deep_agent
+from deepagents.backends.filesystem import FilesystemBackend
 from langchain_openai import ChatOpenAI
 
 from ..hooks import HookMiddleware, AuthMiddleware
@@ -46,14 +47,17 @@ def assemble_middleware(config: Config, hooks: list | None = None, observability
     return middleware
 
 
-def build_deepagent(config: Config, hooks: list | None = None, tools: list | None = None, observability: Any = None) -> Any:
-    """deepagent provider:由 config.llm 建 ChatOpenAI,經 assemble_middleware 組入強制 auth,回傳原生 DeepAgent 物件。"""
+def build_deepagent(config: Config, hooks: list | None = None, tools: list | None = None, observability: Any = None, skills: list | None = None) -> Any:
+    """deepagent provider:由 config.llm 建 ChatOpenAI,經 assemble_middleware 組入強制 auth,回傳原生 DeepAgent 物件。
+    skills 為 deepagent 原生 skill 來源路徑清單(非 tool);有值時以 FilesystemBackend 從磁碟載入 SKILL.md。"""
     llm = _build_llm(config.llm)
     middleware = assemble_middleware(config, hooks, observability)
     return create_deep_agent(
         model=llm,
         system_prompt=config.agent.system_prompt,
         tools=tools or [],
+        skills=skills or None,
+        backend=FilesystemBackend(virtual_mode=False) if skills else None,
         middleware=middleware,
         context_schema=AuthContext,
     )
@@ -77,7 +81,7 @@ def register_provider(name: str, builder: Callable) -> None:
     _PROVIDER_BUILDERS[name] = builder
 
 
-def get_provider_builder(config: Config, hooks: list | None = None, tools: list | None = None, observability: Any = None) -> Any:
+def get_provider_builder(config: Config, hooks: list | None = None, tools: list | None = None, observability: Any = None, skills: list | None = None) -> Any:
     """唯一入口:依 config.agent.provider 選出具體 provider 的 build 函式並執行,回傳原生 agent。
     未知 provider 拋出清楚錯誤。AgentBuilder.build 與外部呼叫者都經由此,避免重複分派邏輯。"""
     provider = config.agent.provider
@@ -87,4 +91,4 @@ def get_provider_builder(config: Config, hooks: list | None = None, tools: list 
         raise ValueError(
             f"unsupported provider: {provider!r}; supported: {sorted(_PROVIDER_BUILDERS)}"
         ) from None
-    return builder(config, hooks=hooks, tools=tools, observability=observability)
+    return builder(config, hooks=hooks, tools=tools, observability=observability, skills=skills)

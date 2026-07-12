@@ -61,22 +61,21 @@ class MockRegistryClient(RegistryClient):
 
 ### 接進 builder(唯一匯流點)
 
-`AgentBuilder` 多收可注入的 `registry`,`build()` 在載入前先解析並 append 到 local 清單之後:
+`build()` 內部自建 `HttpRegistryClient`(**不注入**),直接讀 config 各 section 的 `registry_url`
+解析 remote,append 到 local 清單之後:
 
 ```python
 def build(self):
-    mcps = list(self._mcps)      # config.local + add_mcp
-    skills = list(self._skills)  # config.local + add_skill
-    if self._registry is not None:
-        mcps.extend(self._registry.resolve_mcps(self._config.mcps.remote))
-        skills.extend(self._registry.resolve_skills(self._config.skills.remote))
-    tools = list(load_configured_mcp_tools(mcps))
-    tools.extend(load_skill_tools(skills))
-    return get_provider_builder(...)
+    registry = HttpRegistryClient()   # 無狀態;registry_url 由 config 的 ref 帶入
+    mcps = [*self._mcps, *registry.resolve_mcps(self._config.mcps.remote)]     # config.local + add_mcp + remote
+    skills = [*self._skills, *registry.resolve_skills(self._config.skills.remote)]
+    tools = load_configured_mcp_tools(mcps)
+    return get_provider_builder(..., skills=skill_sources(skills))
 ```
 
-- `registry=None` 時整段跳過,行為與現況完全相同(remote 純加值、向後相容)。
-- remote 沒有 `add_*` 對應,強制其只從 config 進來。
+- `registry_url` 為空時 `resolve_*` 回 `[]`(no-op、不打網路),故無 remote 設定時行為與現況相同。
+- registry **不從外部注入**——remote 一律由 config 的 `registry_url` 決定,強制其只從 config 進來。
+- 測試以 `monkeypatch` 換掉 `builder.HttpRegistryClient` 注入 fake resolver。
 
 ## Remote MCP — 乾淨,無懸念
 

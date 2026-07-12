@@ -57,21 +57,22 @@ def _cfg(remote_mcps=None):
     )
 
 
-def test_builder_appends_remote_after_local(monkeypatch):
+def test_builder_resolves_remote_from_config(monkeypatch):
     captured = {}
     monkeypatch.setattr(bmod, "load_configured_mcp_tools", lambda mcps: [m.name for m in mcps])
-    monkeypatch.setattr(bmod, "load_skill_tools", lambda skills: [])
+    monkeypatch.setattr(bmod, "skill_sources", lambda skills: [])
+    monkeypatch.setattr(bmod, "HttpRegistryClient", lambda: _FakeRegistry())   # 內建 resolver
     monkeypatch.setattr(bmod, "get_provider_builder",
-                        lambda config, hooks, tools, observability=None: captured.update(tools=tools) or "AGENT")
-    AgentBuilder(_cfg(remote_mcps=["remote_mcp"]), registry=_FakeRegistry()).build()
-    assert captured["tools"] == ["local_mcp", "remote_mcp"]  # remote 在 local 之後
+                        lambda config, hooks, tools, skills=None, observability=None: captured.update(tools=tools) or "AGENT")
+    AgentBuilder(_cfg(remote_mcps=["remote_mcp"])).build()
+    assert captured["tools"] == ["local_mcp", "remote_mcp"]  # remote(來自 config)在 local 之後
 
 
-def test_builder_skips_resolution_without_registry(monkeypatch):
+def test_builder_no_remote_when_config_has_no_names(monkeypatch):
     captured = {}
     monkeypatch.setattr(bmod, "load_configured_mcp_tools", lambda mcps: [m.name for m in mcps])
-    monkeypatch.setattr(bmod, "load_skill_tools", lambda skills: [])
+    monkeypatch.setattr(bmod, "skill_sources", lambda skills: [])
     monkeypatch.setattr(bmod, "get_provider_builder",
-                        lambda config, hooks, tools, observability=None: captured.update(tools=tools) or "AGENT")
-    AgentBuilder(_cfg(remote_mcps=["remote_mcp"])).build()  # 無 registry
-    assert captured["tools"] == ["local_mcp"]  # remote 完全跳過
+                        lambda config, hooks, tools, skills=None, observability=None: captured.update(tools=tools) or "AGENT")
+    AgentBuilder(_cfg()).build()  # remote name=[] → 真實 HttpRegistryClient no-op(不打網路)
+    assert captured["tools"] == ["local_mcp"]

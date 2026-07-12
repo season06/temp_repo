@@ -22,7 +22,7 @@ from deepagents import create_deep_agent
 BASE = "http://test"
 
 
-SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_fixture.py")
+SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_src")
 
 
 def _cfg():
@@ -71,24 +71,27 @@ def test_acceptance_build_invoke_and_stream(monkeypatch):
     assert len(chunks) > 0
 
 
-# req.md 驗收點 2:add_skill(file) + add_mcp(stdio) 被 agent 呼叫
-def test_acceptance_mcp_and_skill_tools_are_called(monkeypatch):
+# req.md 驗收點 2:add_mcp(stdio) tool 被呼叫;add_skill 以來源路徑接上 deepagent 原生 skills=(與 tool 不同)
+def test_acceptance_mcp_tool_called_and_skill_source_wired(monkeypatch):
     monkeypatch.setattr(factory, "HttpAuthClient", lambda ep: _Allow())   # 入口 auth 放行
     server = os.path.join(os.path.dirname(__file__), "mcp_server.py")
+
+    # MCP tool 真的被執行
     model = FakeToolModel(scripted=[
         AIMessage(content="", tool_calls=[{"name": "echo", "args": {"text": "x"}, "id": "c1"}]),
-        AIMessage(content="", tool_calls=[{"name": "greet", "args": {}, "id": "c2"}]),
         AIMessage(content="done"),
     ])
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: model)
-    agent = (AgentBuilder(_cfg())
-             .add_mcp("t", "stdio", server)
-             .add_skill("greet", SKILL_FIXTURE)
-             .build())
+    agent = AgentBuilder(_cfg()).add_mcp("t", "stdio", server).build()
     out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}, context={"identity": "acceptance"}))
     contents = [str(getattr(m, "content", None)) for m in out["messages"]]
     assert any("echo:x" in c for c in contents)         # MCP tool ran
-    assert any("hi-from-skill" in c for c in contents)  # skill tool ran
+
+    # skill 以來源路徑接上 deepagent 原生 skills=(非 tool)
+    captured = {}
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: captured.update(k) or "AGENT")
+    AgentBuilder(_cfg()).add_skill("greet", SKILL_FIXTURE).build()
+    assert SKILL_FIXTURE in captured["skills"]
 
 
 # req.md 驗收點 3a:hooks 於 llm/tool 前後觸發 + auth allow

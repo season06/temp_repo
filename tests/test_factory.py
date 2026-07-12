@@ -153,7 +153,7 @@ def test_get_provider_builder_unknown_raises():
 def test_build_agent_dispatches_to_registered_provider(monkeypatch):
     captured = {}
     monkeypatch.setitem(factory._PROVIDER_BUILDERS, "custom",
-                        lambda config, hooks, tools, observability=None: captured.update(hit=True) or "CUSTOM")
+                        lambda config, hooks, tools, observability=None, skills=None: captured.update(hit=True) or "CUSTOM")
     cfg = _cfg(api_key="k", base_url="b", model="m")
     cfg.agent.provider = "custom"
     assert factory.get_provider_builder(cfg) == "CUSTOM"
@@ -212,3 +212,21 @@ def test_build_passes_context_schema(monkeypatch):
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
     factory.get_provider_builder(_cfg_auth())
     assert calls["context_schema"] is AuthContext
+
+
+def test_build_passes_skill_sources_and_filesystem_backend(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+    factory.get_provider_builder(_cfg_auth(), skills=["/skills/greet"])
+    assert calls["skills"] == ["/skills/greet"]            # skill 以路徑傳入 deepagent skills=(非 tool)
+    assert isinstance(calls["backend"], factory.FilesystemBackend)
+
+
+def test_build_no_skills_leaves_backend_default(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+    factory.get_provider_builder(_cfg_auth())
+    assert calls["skills"] is None
+    assert calls["backend"] is None

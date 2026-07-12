@@ -10,11 +10,10 @@ agent:
 # Tools Configuraion
 # ============================
 
+# skill = deepagent 原生 skill(非 tool);path 指向含 SKILL.md 的來源目錄
 skills__local:
-  - name: make_a_joke
-    path: "./skills/make_a_joke.py"
-  - name: translate
-    path: "./skills/translate.py"
+  - name: make-a-joke
+    path: "./skills"      # 來源目錄,內含 make-a-joke/SKILL.md
 
 skills__remote:
   registry_url: ""

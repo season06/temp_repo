@@ -8,7 +8,7 @@ from agent_template.config import Config, LLMConfig, AgentSettings, SkillsConfig
 from examples.agent import build_example_agent
 from tests.fakes import FakeToolModel
 
-SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_fixture.py")
+SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_src")
 
 
 class _Allow:
@@ -24,19 +24,14 @@ def _cfg(**over):
     return Config(**base)
 
 
-def test_build_example_agent_runs_skill_tool(monkeypatch):
+def test_build_example_agent_wires_skill_source(monkeypatch):
     monkeypatch.setattr(factory, "HttpAuthClient", lambda ep: _Allow())   # 入口 auth 放行
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    captured = {}
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: captured.update(k) or "AGENT")
     cfg = _cfg(skills=SkillsConfig(local=[LocalSkill(name="greet", path=SKILL_FIXTURE)]))
-    model = FakeToolModel(scripted=[
-        AIMessage(content="", tool_calls=[{"name": "greet", "args": {}, "id": "c1"}]),
-        AIMessage(content="done"),
-    ])
-    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: model)
-    agent = build_example_agent(cfg)
-    out = asyncio.run(agent.ainvoke({"messages": [("user", "hello")]}, context={"identity": "demo"}))
-    contents = [str(getattr(m, "content", None)) for m in out["messages"]]
-    assert any("hi-from-skill" in c for c in contents)  # skill tool (from config) executed
-    assert out["messages"][-1].content == "done"
+    build_example_agent(cfg)
+    assert SKILL_FIXTURE in captured["skills"]   # skill 以來源路徑接上 deepagent skills=(非 tool)
 
 
 def test_build_example_agent_default_auth_from_config_builds(monkeypatch):

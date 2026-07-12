@@ -23,4 +23,3 @@ def load_skill_file(path: str) -> list[BaseTool]:
     return [obj for obj in vars(module).values() if isinstance(obj, BaseTool)]
 
 a = load_skill_file('./skill.py')
-print(a)

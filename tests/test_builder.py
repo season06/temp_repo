@@ -7,7 +7,7 @@ from agent_template.core import AgentBuilder
 from agent_template.config import Config, LLMConfig, AgentSettings, SkillsConfig, McpsConfig, LocalSkill, LocalMcp, AuthConfig
 from agent_template.hooks import Hook
 
-SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_fixture.py")
+SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_src")
 MCP_SERVER = os.path.join(os.path.dirname(__file__), "mcp_server.py")
 
 
@@ -50,19 +50,20 @@ def test_builder_seeds_from_config_then_appends():
     assert [m.name for m in cfg.mcps.local] == ["cfg_mcp"]
 
 
-def test_build_combines_mcp_and_skill_tools(monkeypatch):
+def test_build_wires_mcp_tools_and_skill_sources(monkeypatch):
     monkeypatch.setattr(bmod, "load_configured_mcp_tools", lambda mcps: ["MCP:" + m.name for m in mcps])
-    monkeypatch.setattr(bmod, "load_skill_tools", lambda skills: ["SKILL:" + s.name for s in skills])
+    monkeypatch.setattr(bmod, "skill_sources", lambda skills: ["SRC:" + s.name for s in skills])
     captured = {}
     monkeypatch.setattr(bmod, "get_provider_builder",
-                        lambda config, hooks, tools, observability=None: captured.update(tools=tools) or "AGENT")
+                        lambda config, hooks, tools, skills=None, observability=None: captured.update(tools=tools, skills=skills) or "AGENT")
     b = AgentBuilder(_cfg())
-    agent = b.add_mcp("s1", "stdio", "./a.py").add_skill("greet", "./g.py").build()
+    agent = b.add_mcp("s1", "stdio", "./a.py").add_skill("greet", "./g").build()
     assert agent == "AGENT"
-    assert captured["tools"] == ["MCP:s1", "SKILL:greet"]
+    assert captured["tools"] == ["MCP:s1"]      # skill 不再進 tools
+    assert captured["skills"] == ["SRC:greet"]  # skill 以來源路徑傳入
 
 
-def test_build_wires_real_mcp_and_skill_tools_into_create_deep_agent(monkeypatch):
+def test_build_wires_real_mcp_tools_and_skill_source_into_create_deep_agent(monkeypatch):
     captured = {}
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: captured.update(k) or "AGENT")
@@ -71,8 +72,9 @@ def test_build_wires_real_mcp_and_skill_tools_into_create_deep_agent(monkeypatch
     agent = b.build()
     assert agent == "AGENT"
     names = [getattr(t, "name", None) for t in captured["tools"]]
-    assert "echo" in names   # real MCP tool loaded from the subprocess server
-    assert "greet" in names  # skill tool loaded from the fixture file
+    assert "echo" in names        # real MCP tool loaded from the subprocess server
+    assert "greet" not in names   # skill 不是 tool
+    assert SKILL_FIXTURE in captured["skills"]   # skill 以來源路徑傳給 deepagent skills=
 
 
 def test_config_mcps_and_skills_are_loaded_at_build(monkeypatch):
@@ -85,7 +87,8 @@ def test_config_mcps_and_skills_are_loaded_at_build(monkeypatch):
     )
     AgentBuilder(cfg).build()
     names = [getattr(t, "name", None) for t in captured["tools"]]
-    assert "echo" in names and "greet" in names  # both came straight from config
+    assert "echo" in names                        # mcp tool from config
+    assert SKILL_FIXTURE in captured["skills"]    # skill source from config
 
 
 def test_add_mcp_func_filter(monkeypatch):
@@ -103,9 +106,9 @@ def test_add_mcp_func_filter(monkeypatch):
 def test_builder_passes_observability_to_build_agent(monkeypatch):
     captured = {}
     monkeypatch.setattr(bmod, "load_configured_mcp_tools", lambda mcps: [])
-    monkeypatch.setattr(bmod, "load_skill_tools", lambda skills: [])
+    monkeypatch.setattr(bmod, "skill_sources", lambda skills: [])
     monkeypatch.setattr(bmod, "get_provider_builder",
-                        lambda config, hooks, tools, observability=None: captured.update(obs=observability) or "AGENT")
+                        lambda config, hooks, tools, skills=None, observability=None: captured.update(obs=observability) or "AGENT")
 
     class _Obs:
         enabled = True
@@ -119,10 +122,10 @@ def test_builder_passes_observability_to_build_agent(monkeypatch):
 
 def test_build_delegates_to_build_agent_with_full_config(monkeypatch):
     monkeypatch.setattr(bmod, "load_configured_mcp_tools", lambda mcps: [])
-    monkeypatch.setattr(bmod, "load_skill_tools", lambda skills: [])
+    monkeypatch.setattr(bmod, "skill_sources", lambda skills: [])
     seen = {}
     monkeypatch.setattr(bmod, "get_provider_builder",
-                        lambda config, hooks, tools, observability=None: seen.update(provider=config.agent.provider) or "AGENT")
+                        lambda config, hooks, tools, skills=None, observability=None: seen.update(provider=config.agent.provider) or "AGENT")
     cfg = _cfg()
     cfg.agent.provider = "my-framework"
     AgentBuilder(cfg).build()
