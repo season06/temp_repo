@@ -127,17 +127,16 @@ agent = AgentBuilder(config).add_hook(MyHook()).build()
 - 回傳 `None` 繼續、回傳 `StopRound` 中止該輪。
 - 內建 **session_stop**:tool/mcp 或 LLM 回應帶 `{"status": "session_stop"}`(`response_metadata` / `additional_kwargs`)即中止該輪。偵測點在 `agent_template.session.is_session_stop`(單點可換)。
 
-### 3. Authentication
+### 3. 身分認證(強制)
 
-`AuthHook` 在 tool 執行前打 auth 端點,非 200 即中止該輪(fail-closed):
+每次呼叫 agent 前,SDK 會在入口強制執行身分認證,且 per-tool 層也會自動驗證 —— 這是不可移除、
+不可繞過的機制(於 build 時由 `assemble_middleware` 注入,auth 永遠排在最前)。
 
-```python
-from agent_template.auth import AuthHook, HttpAuthClient
-
-agent = (AgentBuilder(config)
-         .add_hook(AuthHook(HttpAuthClient(config.auth.endpoint)))
-         .build())
-```
+- 設定端點:`.env` 的 `AUTH_ENDPOINT`(未設則 build 直接失敗,fail-closed)。
+- 傳入身分:呼叫時用 `context=`,例如
+  `agent.invoke({"messages": [...]}, context={"identity": "alice"})`。
+- 驗不過:入口 `raise AuthenticationError`;per-tool `StopRound` 中止該輪。
+- 疊加自有 hook:`builder.add_hook(MyHook())` 仍可用,會排在強制 auth 之後執行。
 
 A2A server 入站用 **async** 版 `AsyncHttpAuthClient`(見下)。`AuthClient` 為單點可換介面。
 
@@ -198,12 +197,12 @@ async with httpx.AsyncClient() as hc:
 
 ## Example Agent
 
-`examples/agent.py::build_example_agent(config, observability=None, auth_client=None, extra_hooks=None)` 串起 auth / MCP / skill / observability / hooks 的完整示範(skills/mcps 由 `config` 帶入);`python -m examples.agent` 用 `Config.load()` 有真實用法範例。
+`examples/agent.py::build_example_agent(config, observability=None, extra_hooks=None)` 串起(強制)auth / MCP / skill / observability / hooks 的完整示範(skills/mcps 由 `config` 帶入,auth 由 SDK 自動注入);`python -m examples.agent` 用 `Config.load()` 有真實用法範例,呼叫時以 `context={"identity": ...}` 傳入身分。
 
 ## 測試
 
 ```bash
-.venv/bin/python -m pytest          # 122 tests
+.venv/bin/python -m pytest          # 147 tests
 ```
 
 `tests/test_acceptance.py` 對照本 README 各功能逐點端到端驗證(用假模型 / 真實 stdio MCP 子行程 / in-process A2A / in-memory OTel,不需真實 LLM 或外部服務)。

@@ -1,8 +1,7 @@
 import httpx
-import pytest
 
 from agent_template.auth import clients as auth_mod
-from agent_template.auth import AuthClient, HttpAuthClient, AuthHook
+from agent_template.auth import HttpAuthClient, AuthHook
 from agent_template.hooks import HookContext, StopRound
 
 
@@ -19,11 +18,6 @@ class _DenyClient:
 class _FakeResponse:
     def __init__(self, status_code):
         self.status_code = status_code
-
-
-def test_base_auth_client_not_implemented():
-    with pytest.raises(NotImplementedError):
-        AuthClient().verify(None)
 
 
 def test_auth_hook_allows_when_client_ok():
@@ -156,15 +150,6 @@ class _FakeAsyncClient:
         return self._response
 
 
-def test_base_async_auth_client_not_implemented():
-    async def go():
-        from agent_template.auth import AsyncAuthClient
-        await AsyncAuthClient().verify(None)
-
-    with pytest.raises(NotImplementedError):
-        asyncio.run(go())
-
-
 def test_async_http_auth_200_allows(monkeypatch):
     from agent_template.auth import AsyncHttpAuthClient
     monkeypatch.setattr(auth_mod.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient(response=_FakeResponse(200)))
@@ -181,3 +166,34 @@ def test_async_http_auth_error_fails_closed(monkeypatch):
     from agent_template.auth import AsyncHttpAuthClient
     monkeypatch.setattr(auth_mod.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient(raise_exc=RuntimeError("boom")))
     assert asyncio.run(AsyncHttpAuthClient("http://auth").verify(None)) is False
+
+
+def test_auth_payload_picks_tool_only():
+    assert HttpAuthClient._auth_payload(HookContext(phase="before_tool", tool_name="t")) == {"tool": "t"}
+
+
+def test_auth_payload_picks_identity_only():
+    from agent_template.auth.clients import AuthContext
+    assert HttpAuthClient._auth_payload(AuthContext(identity="u1")) == {"identity": "u1"}
+
+
+def test_auth_payload_empty_when_no_fields():
+    from agent_template.auth.clients import AuthContext
+    assert HttpAuthClient._auth_payload(AuthContext()) == {}
+
+
+def test_auth_payload_picks_tool_and_identity():
+    assert HttpAuthClient._auth_payload(HookContext(phase="before_tool", tool_name="t", identity="u")) == {"tool": "t", "identity": "u"}
+
+
+def test_http_auth_client_sends_identity(monkeypatch):
+    from agent_template.auth.clients import AuthContext
+    captured = {}
+
+    def capture(url, json=None, timeout=None):
+        captured["json"] = json
+        return _FakeResponse(200)
+
+    monkeypatch.setattr(auth_mod.httpx, "post", capture)
+    HttpAuthClient("http://auth/verify").verify(AuthContext(identity="alice"))
+    assert captured["json"] == {"identity": "alice"}

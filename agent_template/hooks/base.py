@@ -17,6 +17,7 @@ class HookContext:
     messages: 當前對話訊息（list）— llm 階段使用
     tool_name / tool_args: tool 階段使用
     result: after_llm 的 AI 訊息 / after_tool 的 tool 結果
+    identity: 呼叫端身分（來自 runtime.context），per-tool auth 用
     """
 
     def __init__(
@@ -26,12 +27,14 @@ class HookContext:
         tool_name: str | None = None,
         tool_args: dict | None = None,
         result: Any = None,
+        identity: str | None = None,
     ) -> None:
         self.phase = phase
         self.messages = messages
         self.tool_name = tool_name
         self.tool_args = tool_args
         self.result = result
+        self.identity = identity
 
 
 class Hook:
@@ -49,3 +52,7 @@ class Hook:
 
     def after_tool(self, context: HookContext) -> StopRound | None:
         return None
+
+
+class AuthenticationError(Exception):
+    """入口身分認證未通過時由 AuthMiddleware 拋出;呼叫端可據此與一般錯誤區分。"""

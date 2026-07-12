@@ -4,7 +4,7 @@ import sys
 import agent_template.core.builder as bmod
 import agent_template.core.factory as factory
 from agent_template.core import AgentBuilder
-from agent_template.config import Config, LLMConfig, AgentSettings, SkillsConfig, McpsConfig, LocalSkill, LocalMcp
+from agent_template.config import Config, LLMConfig, AgentSettings, SkillsConfig, McpsConfig, LocalSkill, LocalMcp, AuthConfig
 from agent_template.hooks import Hook
 
 SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_fixture.py")
@@ -17,6 +17,7 @@ def _cfg(skills=None, mcps=None):
         agent=AgentSettings(system_prompt="x"),
         skills=SkillsConfig(local=skills or []),
         mcps=McpsConfig(local=mcps or []),
+        auth=AuthConfig(endpoint="http://auth/verify"),
     )
 
 

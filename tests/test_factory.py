@@ -3,7 +3,9 @@ from agent_template.config import Config, LLMConfig, AgentSettings
 
 
 def _cfg(system_prompt=None, **llm):
-    return Config(llm=LLMConfig(**llm), agent=AgentSettings(system_prompt=system_prompt))
+    from agent_template.config import AuthConfig
+    return Config(llm=LLMConfig(**llm), agent=AgentSettings(system_prompt=system_prompt),
+                  auth=AuthConfig(endpoint="http://auth/verify"))
 
 
 def test_build_llm_passes_openai_compatible_params(monkeypatch):
@@ -51,30 +53,31 @@ def test_build_agent_returns_native_object_with_invoke_and_stream():
 
 def test_build_agent_wires_hook_middleware_when_hooks_given(monkeypatch):
     calls = {}
-
-    def fake_create_deep_agent(**kwargs):
-        calls.update(kwargs)
-        return "AGENT"
-
-    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
-    monkeypatch.setattr(factory, "create_deep_agent", fake_create_deep_agent)
-
-    from agent_template.hooks import Hook
-    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"), hooks=[Hook()])
-
-    mw = calls["middleware"]
-    assert len(mw) == 1
-    from agent_template.hooks import HookMiddleware
-    assert isinstance(mw[0], HookMiddleware)
-
-
-def test_build_agent_no_hooks_passes_empty_middleware(monkeypatch):
-    calls = {}
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
     monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
 
+    from agent_template.hooks import Hook, AuthMiddleware, HookMiddleware
+    from agent_template.auth import AuthHook
+    user = Hook()
+    factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"), hooks=[user])
+
+    mw = calls["middleware"]
+    assert isinstance(mw[0], AuthMiddleware)
+    assert isinstance(mw[1], HookMiddleware)
+    assert isinstance(mw[1]._hooks[0], AuthHook)   # auth 先
+    assert mw[1]._hooks[1] is user                 # 使用者 hook 在後
+
+
+def test_build_agent_no_hooks_still_has_auth_and_hook_middleware(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
     factory.get_provider_builder(_cfg(api_key="k", base_url="b", model="m"))
-    assert calls["middleware"] == []
+    from agent_template.hooks import AuthMiddleware, HookMiddleware
+    mw = calls["middleware"]
+    assert isinstance(mw[0], AuthMiddleware)
+    assert isinstance(mw[1], HookMiddleware)
+    assert len(mw) == 2
 
 
 def test_build_agent_passes_tools(monkeypatch):
@@ -155,3 +158,57 @@ def test_build_agent_dispatches_to_registered_provider(monkeypatch):
     cfg.agent.provider = "custom"
     assert factory.get_provider_builder(cfg) == "CUSTOM"
     assert captured["hit"] is True
+
+
+def _cfg_auth(endpoint="http://auth/verify"):
+    from agent_template.config import AuthConfig
+    cfg = _cfg(api_key="k", base_url="b", model="m")
+    cfg.auth = AuthConfig(endpoint=endpoint)
+    return cfg
+
+
+def test_assemble_middleware_auth_first_then_hookmiddleware():
+    from agent_template.hooks import AuthMiddleware, HookMiddleware
+    mw = factory.assemble_middleware(_cfg_auth())
+    assert isinstance(mw[0], AuthMiddleware)
+    assert isinstance(mw[1], HookMiddleware)
+    assert len(mw) == 2
+
+
+def test_assemble_middleware_injects_authhook_before_user_hooks():
+    from agent_template.auth import AuthHook
+    from agent_template.hooks import Hook
+    user = Hook()
+    mw = factory.assemble_middleware(_cfg_auth(), hooks=[user])
+    hookmw_hooks = mw[1]._hooks
+    assert isinstance(hookmw_hooks[0], AuthHook)   # auth 先
+    assert hookmw_hooks[1] is user                 # 使用者 hook 疊加在後
+
+
+def test_assemble_middleware_missing_endpoint_raises():
+    import pytest
+    from agent_template.config import AuthConfig
+    cfg = _cfg(api_key="k", base_url="b", model="m")
+    cfg.auth = AuthConfig()   # 無 endpoint → fail-closed
+    with pytest.raises(ValueError, match="auth endpoint not configured"):
+        factory.assemble_middleware(cfg)
+
+
+def test_build_missing_auth_endpoint_raises(monkeypatch):
+    import pytest
+    from agent_template.config import AuthConfig
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: "AGENT")
+    cfg = _cfg(api_key="k", base_url="b", model="m")
+    cfg.auth = AuthConfig()   # 無 endpoint
+    with pytest.raises(ValueError, match="auth endpoint not configured"):
+        factory.get_provider_builder(cfg)
+
+
+def test_build_passes_context_schema(monkeypatch):
+    from agent_template.auth import AuthContext
+    calls = {}
+    monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: "LLM")
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **k: calls.update(k) or "AGENT")
+    factory.get_provider_builder(_cfg_auth())
+    assert calls["context_schema"] is AuthContext

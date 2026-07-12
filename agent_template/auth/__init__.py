@@ -1,1 +1,2 @@
-from .clients import AuthClient, HttpAuthClient, AuthHook, AsyncAuthClient, AsyncHttpAuthClient
+from .clients import HttpAuthClient, AuthHook, AsyncHttpAuthClient, AuthContext
+from ..hooks import AuthenticationError

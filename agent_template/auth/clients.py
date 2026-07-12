@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -10,14 +11,15 @@ if TYPE_CHECKING:
     from ..hooks import HookContext
 
 
-class AuthClient:
-    """auth 檢查介面;verify 回傳 True=放行。正式契約由團隊定,MVP 用 HttpAuthClient 或測試注入 fake。"""
+@dataclass
+class AuthContext:
+    """呼叫端在 invoke/ainvoke 時透過 context= 傳入的身分;middleware 由 runtime.context 讀取。"""
 
-    def verify(self, context: Any) -> bool:
-        raise NotImplementedError
+    identity: str | None = None
 
 
-class HttpAuthClient(AuthClient):
+
+class HttpAuthClient:
     """打一個 HTTP request 到 auth 端點;HTTP 200 代表放行（MVP mock）。
     連線/HTTP 或任何錯誤一律視為未通過（fail-closed）。"""
 
@@ -25,9 +27,22 @@ class HttpAuthClient(AuthClient):
         self._endpoint = endpoint
         self._timeout = timeout
 
+    @staticmethod
+    def _auth_payload(context: Any) -> dict:
+        """組出要送給 auth 端點的欄位(只放存在的)。
+        per-tool 來的 HookContext 帶 tool_name;入口來的 AuthContext 帶 identity。"""
+        payload: dict = {}
+        tool = getattr(context, "tool_name", None)
+        if tool is not None:
+            payload["tool"] = tool
+        identity = getattr(context, "identity", None)
+        if identity is not None:
+            payload["identity"] = identity
+        return payload
+
     def verify(self, context: Any) -> bool:
         try:
-            response = httpx.post(self._endpoint, json={"tool": context.tool_name}, timeout=self._timeout)
+            response = httpx.post(self._endpoint, json=self._auth_payload(context), timeout=self._timeout)
         except Exception:
             return False
         return response.status_code == 200
@@ -46,14 +61,7 @@ class AuthHook(Hook):
         return StopRound(reason="auth denied for tool: " + str(context.tool_name))
 
 
-class AsyncAuthClient:
-    """非同步 auth 介面(A2A 入站用);verify 回傳 True=放行。"""
-
-    async def verify(self, context: Any) -> bool:
-        raise NotImplementedError
-
-
-class AsyncHttpAuthClient(AsyncAuthClient):
+class AsyncHttpAuthClient:
     """非同步版:httpx.AsyncClient 打 auth 端點,200=放行;任何錯誤 fail-closed。
     用於 A2A server 入站邊界(不阻塞 event loop)。"""
 

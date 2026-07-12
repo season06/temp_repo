@@ -7,8 +7,32 @@ from collections.abc import Callable
 from langchain.agents.middleware import AgentMiddleware, hook_config
 from langchain_core.messages import ToolMessage
 
-from .base import Hook, HookContext, StopRound
+from .base import Hook, HookContext, StopRound, AuthenticationError
 from .session import is_session_stop, make_session_stop_metadata
+
+
+class AuthMiddleware(AgentMiddleware):
+    """SDK 強制的入口身分認證。每次 agent 執行前(before_agent)驗證呼叫端身分;
+    未通過直接 raise AuthenticationError,LLM/tools 完全不會執行。
+    由 assemble_middleware 注入且排在最前,使用者無法移除或繞過。
+
+    僅實作 before_agent(sync);ainvoke 亦回退呼叫本方法。
+    MVP 限制:sync client 於 async 執行下會短暫阻塞 event loop(與 AuthHook 相同,已文件化)。"""
+
+    def __init__(self, client: Any) -> None:
+        super().__init__()
+        self._client = client
+
+    def before_agent(self, state: dict, runtime: Any) -> dict | None:
+        context = getattr(runtime, "context", None)
+        # Handle both dict and object (coerced AuthContext) contexts
+        if isinstance(context, dict):
+            identity = context.get("identity", None)
+        else:
+            identity = getattr(context, "identity", None)
+        if identity is None or not self._client.verify(context):
+            raise AuthenticationError("authentication required before agent invocation")
+        return None
 
 
 class HookMiddleware(AgentMiddleware):
@@ -51,30 +75,37 @@ class HookMiddleware(AgentMiddleware):
 
     def wrap_tool_call(self, request: Any, handler: Callable) -> Any:
         tool_call = request.tool_call
-        blocked = self._run_before_tool(tool_call)
+        identity = self._identity_from_request(request)
+        blocked = self._run_before_tool(tool_call, identity)
         if blocked is not None:
             return blocked
-        return self._run_after_tool(tool_call, handler(request))
+        return self._run_after_tool(tool_call, handler(request), identity)
 
     async def awrap_tool_call(self, request: Any, handler: Callable) -> Any:
         # MCP tool 為 async-only → agent 走 ainvoke;langchain 的 awrap_tool_call
         # 不會 fallback 到 sync 版,故必須提供本方法,hooks/auth 才會在 async 執行下生效。
         tool_call = request.tool_call
-        blocked = self._run_before_tool(tool_call)
+        identity = self._identity_from_request(request)
+        blocked = self._run_before_tool(tool_call, identity)
         if blocked is not None:
             return blocked
-        return self._run_after_tool(tool_call, await handler(request))
+        return self._run_after_tool(tool_call, await handler(request), identity)
 
-    def _run_before_tool(self, tool_call: dict) -> Any | None:
-        context = HookContext(phase="before_tool", tool_name=tool_call["name"], tool_args=tool_call.get("args"))
+    @staticmethod
+    def _identity_from_request(request: Any) -> str | None:
+        context = getattr(getattr(request, "runtime", None), "context", None)
+        return getattr(context, "identity", None)
+
+    def _run_before_tool(self, tool_call: dict, identity: str | None = None) -> Any | None:
+        context = HookContext(phase="before_tool", tool_name=tool_call["name"], tool_args=tool_call.get("args"), identity=identity)
         for hook in self._hooks:
             outcome = hook.before_tool(context)
             if isinstance(outcome, StopRound):
                 return self._stop_message(tool_call, outcome.reason or "stopped by hook")
         return None
 
-    def _run_after_tool(self, tool_call: dict, result: Any) -> Any:
-        context = HookContext(phase="after_tool", tool_name=tool_call["name"], tool_args=tool_call.get("args"), result=result)
+    def _run_after_tool(self, tool_call: dict, result: Any, identity: str | None = None) -> Any:
+        context = HookContext(phase="after_tool", tool_name=tool_call["name"], tool_args=tool_call.get("args"), result=result, identity=identity)
         for hook in self._hooks:
             outcome = hook.after_tool(context)
             if isinstance(outcome, StopRound):

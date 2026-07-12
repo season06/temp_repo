@@ -26,8 +26,10 @@ SKILL_FIXTURE = os.path.join(os.path.dirname(__file__), "skill_fixture.py")
 
 
 def _cfg():
+    from agent_template.config import AuthConfig
     return Config(llm=LLMConfig(api_key="k", base_url="http://x/v1", model="m"),
-                  agent=AgentSettings(system_prompt="x"))
+                  agent=AgentSettings(system_prompt="x"),
+                  auth=AuthConfig(endpoint="http://auth/verify"))
 
 
 class _Allow:
@@ -53,21 +55,25 @@ def _metric_totals(reader):
 
 # req.md 驗收點 1:build + invoke + stream
 def test_acceptance_build_invoke_and_stream(monkeypatch):
+    monkeypatch.setattr(factory, "HttpAuthClient", lambda ep: _Allow())   # 入口 auth 放行
+    ctx = {"identity": "acceptance"}
+
     model = FakeToolModel(scripted=[AIMessage(content="hello-response")])
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: model)   # config.llm 建出 fake model
     agent = AgentBuilder(_cfg()).build()
-    out = agent.invoke({"messages": [("user", "hi")]})
+    out = agent.invoke({"messages": [("user", "hi")]}, context=ctx)
     assert out["messages"][-1].content == "hello-response"
 
     stream_model = FakeToolModel(scripted=[AIMessage(content="streamed")])
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **k: stream_model)
     stream_agent = AgentBuilder(_cfg()).build()
-    chunks = list(stream_agent.stream({"messages": [("user", "hi")]}))
+    chunks = list(stream_agent.stream({"messages": [("user", "hi")]}, context=ctx))
     assert len(chunks) > 0
 
 
 # req.md 驗收點 2:add_skill(file) + add_mcp(stdio) 被 agent 呼叫
 def test_acceptance_mcp_and_skill_tools_are_called(monkeypatch):
+    monkeypatch.setattr(factory, "HttpAuthClient", lambda ep: _Allow())   # 入口 auth 放行
     server = os.path.join(os.path.dirname(__file__), "mcp_server.py")
     model = FakeToolModel(scripted=[
         AIMessage(content="", tool_calls=[{"name": "echo", "args": {"text": "x"}, "id": "c1"}]),
@@ -79,7 +85,7 @@ def test_acceptance_mcp_and_skill_tools_are_called(monkeypatch):
              .add_mcp("t", "stdio", server)
              .add_skill("greet", SKILL_FIXTURE)
              .build())
-    out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}))
+    out = asyncio.run(agent.ainvoke({"messages": [("user", "go")]}, context={"identity": "acceptance"}))
     contents = [str(getattr(m, "content", None)) for m in out["messages"]]
     assert any("echo:x" in c for c in contents)         # MCP tool ran
     assert any("hi-from-skill" in c for c in contents)  # skill tool ran

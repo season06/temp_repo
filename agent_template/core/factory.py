@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, Any
 from deepagents import create_deep_agent
 from langchain_openai import ChatOpenAI
 
-from ..hooks import HookMiddleware
+from ..hooks import HookMiddleware, AuthMiddleware
 from ..observability import ObservabilityMiddleware
+from ..auth import HttpAuthClient, AuthHook, AuthContext
 
 if TYPE_CHECKING:
     from ..config import Config, LLMConfig
@@ -27,17 +28,34 @@ def _build_llm(llm: LLMConfig) -> Any:
     )
 
 
-def build_deepagent(config: Config, hooks: list | None = None, tools: list | None = None, observability: Any = None) -> Any:
-    """deepagent provider:由 config.llm 建 ChatOpenAI,建構並回傳原生 DeepAgent 物件（執行期回歸原生,無包裝）。"""
-    llm = _build_llm(config.llm)
-    middleware = [HookMiddleware(hooks)] if hooks else []
+def assemble_middleware(config: Config, hooks: list | None = None, observability: Any = None) -> list:
+    """唯一的 middleware 組裝點:auth 永遠最前且不可移除。
+    所有 provider builder 都經此組 middleware,故「無 auth 的 middleware 清單」在結構上不存在。
+    config.auth.endpoint 未設 → fail-closed,直接拒絕 build。"""
+    if not config.auth.endpoint:
+        raise ValueError(
+            "auth endpoint not configured; mandatory authentication requires config.auth.endpoint (AUTH_ENDPOINT)"
+        )
+    auth_client = HttpAuthClient(config.auth.endpoint)
+    middleware: list = [
+        AuthMiddleware(auth_client),
+        HookMiddleware([AuthHook(auth_client), *(hooks or [])]),
+    ]
     if observability is not None and observability.enabled:
         middleware.append(ObservabilityMiddleware(observability.instruments, observability.logger, config.llm.model))
+    return middleware
+
+
+def build_deepagent(config: Config, hooks: list | None = None, tools: list | None = None, observability: Any = None) -> Any:
+    """deepagent provider:由 config.llm 建 ChatOpenAI,經 assemble_middleware 組入強制 auth,回傳原生 DeepAgent 物件。"""
+    llm = _build_llm(config.llm)
+    middleware = assemble_middleware(config, hooks, observability)
     return create_deep_agent(
         model=llm,
-        tools=tools or [],
         system_prompt=config.agent.system_prompt,
+        tools=tools or [],
         middleware=middleware,
+        context_schema=AuthContext,
     )
 
 
@@ -53,7 +71,9 @@ _PROVIDER_BUILDERS: dict[str, Callable] = {
 
 
 def register_provider(name: str, builder: Callable) -> None:
-    """註冊(或覆寫)一個 provider 的 build 函式,簽章需與 build_deepagent 相同。"""
+    """註冊(或覆寫)一個 provider 的 build 函式,簽章需與 build_deepagent 相同。
+    自訂/覆寫的 builder 若不呼叫 assemble_middleware,則不會注入強制 auth——此為 adapter 作者的責任
+    (可信種子,擋意外威脅模型下的已知例外)。"""
     _PROVIDER_BUILDERS[name] = builder
 
 
