@@ -63,6 +63,7 @@ def captured(monkeypatch):
     monkeypatch.setattr(factory, "ChatOpenAI", lambda **kw: ("chat", kw))
     monkeypatch.setenv("LLM_API_KEY", "k")
     monkeypatch.setenv("LLM_BASE_URL", "u")
+    monkeypatch.delenv("AGENT_REGISTRY_URL", raising=False)  # 保險:不受外部環境影響
     return box
 
 
@@ -145,3 +146,82 @@ def test_unknown_provider(project, captured):
     bad.write_text(CONFIG.replace("deepagent", "unknown-provider"), encoding="utf-8")
     with pytest.raises(ConfigError, match="unknown-provider"):
         AgentBuilder(bad).build()
+
+
+# ---- Agent Registry (P6) ----
+
+from agent_template.loaders.registry import RemoteBundle, RemoteConfig
+
+
+def make_bundle(tmp_path, mcp=None, with_skill_named=None):
+    remote = RemoteConfig.model_validate({
+        "agent": {"provider": "deepagent", "model": "remote-model",
+                  "system_prompt": "remote prompt"},
+        "mcp": mcp or [],
+    })
+    skills_dir = None
+    if with_skill_named:
+        d = tmp_path / "remote_skills" / with_skill_named
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\nname: r\ndescription: d\n---\nx", encoding="utf-8")
+        skills_dir = str(tmp_path / "remote_skills")
+    return RemoteBundle(remote, skills_dir)
+
+
+def test_remote_agent_section_wins_but_name_stays_local(project, captured, monkeypatch, tmp_path):
+    from agent_template.core import builder
+
+    named = CONFIG.replace("agent:", "agent:\n  name: my-agent")
+    project.write_text(named, encoding="utf-8")
+    seen = {}
+
+    def fake_fetch(name):
+        seen["name"] = name
+        return make_bundle(tmp_path)
+
+    monkeypatch.setattr(builder, "fetch_remote", fake_fetch)
+    AgentBuilder(project).build()
+    assert seen["name"] == "my-agent"  # 用 local 的 name 查詢
+    assert captured["system_prompt"] == "remote prompt"
+    assert captured["model"][1]["model"] == "remote-model"
+
+
+def test_remote_skill_beats_local_on_collision(project, captured, monkeypatch, tmp_path):
+    from agent_template.core import builder
+
+    bundle = make_bundle(tmp_path, with_skill_named="haiku")  # local 也有 haiku
+    monkeypatch.setattr(builder, "fetch_remote", lambda name: bundle)
+    with pytest.warns(UserWarning, match="haiku"):
+        AgentBuilder(project).build()
+    assert captured["skills"] == [str(tmp_path / "remote_skills" / "haiku")]
+
+
+def test_remote_mcp_gets_bearer_and_missing_token_warns(project, captured, monkeypatch, tmp_path):
+    from agent_template.core import builder
+
+    seen = {}
+
+    def fake_load(servers, headers=None):
+        if servers and servers[0].name == "remote-mcp":
+            seen["headers"] = headers
+        return []
+
+    monkeypatch.setattr(builder, "load_mcp_tools", fake_load)
+    bundle = make_bundle(tmp_path, mcp=[{"name": "remote-mcp", "url": "https://m/mcp"}])
+    monkeypatch.setattr(builder, "fetch_remote", lambda name: bundle)
+
+    monkeypatch.setenv("AUTH_TOKEN", "tk")
+    AgentBuilder(project).build()
+    assert seen["headers"] == {"Authorization": "Bearer tk"}
+
+    monkeypatch.setenv("AUTH_TOKEN", "")
+    with pytest.warns(UserWarning, match="AUTH_TOKEN"):
+        AgentBuilder(project).build()
+
+
+def test_no_remote_keeps_local_behavior(project, captured, monkeypatch):
+    from agent_template.core import builder
+
+    monkeypatch.setattr(builder, "fetch_remote", lambda name: None)
+    AgentBuilder(project).build()
+    assert captured["system_prompt"] == "base prompt"

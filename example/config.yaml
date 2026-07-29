@@ -1,4 +1,5 @@
 agent:
+  # name: my-agent   # 填了且設 AGENT_REGISTRY_URL 才會啟用 agent registry
   provider: deepagent
   model: qwen-max
   system_prompt: "you are a helpful agent"

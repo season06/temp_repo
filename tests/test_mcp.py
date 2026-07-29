@@ -32,6 +32,19 @@ def test_success_collects_tools_and_translates_transport(monkeypatch):
     }
 
 
+def test_headers_passed_to_connection(monkeypatch):
+    monkeypatch.setattr(mcp, "MultiServerMCPClient", FakeClient)
+    servers = [McpServer(name="wiki", url="http://x/mcp")]
+    mcp.load_mcp_tools(servers, headers={"Authorization": "Bearer tk"})
+    assert FakeClient.last_connections["wiki"]["headers"] == {"Authorization": "Bearer tk"}
+
+
+def test_no_headers_key_when_none(monkeypatch):
+    monkeypatch.setattr(mcp, "MultiServerMCPClient", FakeClient)
+    mcp.load_mcp_tools([McpServer(name="wiki", url="http://x/mcp")])
+    assert "headers" not in FakeClient.last_connections["wiki"]
+
+
 def test_failure_warns_and_skips_server(monkeypatch):
     monkeypatch.setattr(mcp, "MultiServerMCPClient", BoomClient)
     with pytest.warns(UserWarning, match="wiki.*連線失敗"):

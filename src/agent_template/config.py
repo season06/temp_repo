@@ -14,6 +14,7 @@ class ConfigError(Exception):
 
 class AgentSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    name: str = ""  # agent registry 的查詢 key(暫定,等團隊定案 id 規格)
     provider: str = "deepagent"
     model: str = ""
     system_prompt: str = ""

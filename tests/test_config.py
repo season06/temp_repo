@@ -36,6 +36,12 @@ def test_relative_paths_resolve_to_config_dir(tmp_path, monkeypatch):
     assert config.local_skills == [str(tmp_path / "skills")]
 
 
+def test_agent_name_field(tmp_path):
+    text = VALID.replace("agent:", "agent:\n  name: my-agent")
+    config = load_config(write(tmp_path, "config.yaml", text))
+    assert config.agent.name == "my-agent"
+
+
 def test_unknown_field_fails_with_suggestion(tmp_path):
     bad = VALID.replace("system_prompt", "system_promt")
     with pytest.raises(ConfigError, match="system_prompt"):

@@ -1,18 +1,21 @@
-"""AgentBuilder:init 階段 merge 三種來源,build() 套衝突規則後回傳 Agent。
+"""AgentBuilder:init 階段 merge 各來源,build() 套衝突規則後回傳 Agent。
 
-衝突規則一句話:衝突時 config 贏,且一定發 warning。
+優先序一條鏈:remote > local config > build(),撞名高層贏,且一定發 warning。
 """
 
+import logging
 import warnings
 from pathlib import Path
 
 from ..config import load_config
 from ..loaders.mcp import load_mcp_tools
+from ..loaders.registry import fetch_remote, remote_mcp_headers
 from ..loaders.skills import scan_skills
 from ..loaders.tools import scan_tools
 from .agent import Agent
 from .factory import get_provider_builder
 
+logger = logging.getLogger("agent_template")
 
 # SDK 必要 middleware,建 agent 時一律掛上(具體項目待定,先留空)
 _SDK_MIDDLEWARE = []
@@ -23,11 +26,27 @@ class AgentBuilder:
         if not isinstance(config, (str, Path)):
             raise TypeError("AgentBuilder 只接受 config 檔路徑 (str 或 Path)")
         self._config = load_config(config)
-        self._tools = _dedupe_config_tools([
+        remote = fetch_remote(self._config.agent.name)
+        remote_tools, remote_skills = [], []
+        if remote:
+            # agent 區塊整包以 remote 為準;name 是查詢 key,永遠取 local
+            self._config.agent = remote.config.agent.model_copy(
+                update={"name": self._config.agent.name}
+            )
+            logger.info("使用 remote 設定建立 agent '%s'", self._config.agent.name)
+            headers = remote_mcp_headers()
+            if remote.config.mcp and headers is None:
+                warnings.warn("remote mcp 需要 AUTH_TOKEN 但未設定,可能驗證失敗")
+            remote_tools = load_mcp_tools(remote.config.mcp, headers=headers)
+            if remote.skills_dir:
+                remote_skills = scan_skills([remote.skills_dir])
+        # remote 排前面:dedupe 先到先贏 = remote > local
+        self._tools = _dedupe_named([
+            *remote_tools,
             *scan_tools(self._config.local_tools),
             *load_mcp_tools(self._config.local_mcp),
-        ])
-        self._skills = scan_skills(self._config.local_skills)
+        ], kind="tool")
+        self._skills = _dedupe_skills([*remote_skills, *scan_skills(self._config.local_skills)])
 
     def build(self, **kwargs):
         model = self._resolve_model(kwargs)
@@ -55,14 +74,26 @@ class AgentBuilder:
         return config_value or provided
 
 
-def _dedupe_config_tools(tools: list) -> list:
+def _dedupe_named(items: list, kind) -> list:
     result, names = [], set()
-    for t in tools:
-        if t.name in names:
-            warnings.warn(f'config 來源中 tool "{t.name}" 重複,保留先載入者')
+    for item in items:
+        if item.name in names:
+            warnings.warn(f'{kind} "{item.name}" 來源間重複,保留優先來源(remote > local)')
             continue
-        result.append(t)
-        names.add(t.name)
+        result.append(item)
+        names.add(item.name)
+    return result
+
+
+def _dedupe_skills(paths: list) -> list:
+    result, names = [], set()
+    for p in paths:
+        name = Path(p).name
+        if name in names:
+            warnings.warn(f'skill "{name}" 來源間重複,保留優先來源(remote > local)')
+            continue
+        result.append(str(p))
+        names.add(name)
     return result
 
 
