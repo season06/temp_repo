@@ -1,0 +1,16 @@
+agent:
+  provider: deepagent
+  model: qwen-max
+  system_prompt: "you are a helpful agent"
+
+# MCP 需要可連線的 server 才能啟用,範例以註解呈現
+# local_mcp:
+#   - name: my-mcp
+#     transport: streamable-http
+#     url: http://localhost:8000/mcp
+
+local_tools:
+  - "./tools/"
+
+local_skills:
+  - "./skills/"
