@@ -27,15 +27,28 @@ class McpServer(BaseModel):
     url: str
 
 
+class A2aAgent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    url: str
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agent: AgentSection = AgentSection()
+    agent_card: str = ""  # card 檔路徑指標;空值則找 config 同目錄的 agent_card.yaml/.json
     local_mcp: list[McpServer] = []
     local_tools: list[str] = []
     local_skills: list[str] = []
+    local_a2a: list[A2aAgent] = []
 
 
-_ALL_FIELDS = [*Config.model_fields, *AgentSection.model_fields, *McpServer.model_fields]
+_ALL_FIELDS = [
+    *Config.model_fields,
+    *AgentSection.model_fields,
+    *McpServer.model_fields,
+    *A2aAgent.model_fields,
+]
 
 
 def load_config(path):
@@ -50,7 +63,19 @@ def load_config(path):
         raise ConfigError(_humanize(exc)) from exc
     config.local_tools = [str(path.parent / p) for p in config.local_tools]
     config.local_skills = [str(path.parent / p) for p in config.local_skills]
+    config.agent_card = _resolve_card_path(path.parent, config.agent_card)
     return config
+
+
+def _resolve_card_path(base_dir, declared):
+    """card 檔路徑:有宣告就用宣告的;否則找同目錄的 agent_card.yaml / agent_card.json。"""
+    if declared:
+        return str(base_dir / declared)
+    for name in ("agent_card.yaml", "agent_card.json"):
+        candidate = base_dir / name
+        if candidate.is_file():
+            return str(candidate)
+    return ""
 
 
 def _humanize(exc):

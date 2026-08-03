@@ -7,7 +7,9 @@ import logging
 import warnings
 from pathlib import Path
 
+from ..a2a.card import resolve_card
 from ..config import load_config
+from ..loaders.a2a import load_a2a_tools
 from ..loaders.mcp import load_mcp_tools
 from ..loaders.registry import fetch_remote, remote_mcp_headers
 from ..loaders.skills import scan_skills
@@ -40,13 +42,17 @@ class AgentBuilder:
             remote_tools = load_mcp_tools(remote.config.mcp, headers=headers)
             if remote.skills_dir:
                 remote_skills = scan_skills([remote.skills_dir])
-        # remote 排前面:dedupe 先到先贏 = remote > local
+        # remote 排前面:dedupe 先到先贏 = remote > local;a2a 排 local 來源之後
         self._tools = _dedupe_named([
             *remote_tools,
             *scan_tools(self._config.local_tools),
             *load_mcp_tools(self._config.local_mcp),
+            *load_a2a_tools(self._config.local_a2a),
         ], kind="tool")
         self._skills = _dedupe_skills([*remote_skills, *scan_skills(self._config.local_skills)])
+        self._card = resolve_card(
+            self._config.agent_card, remote.card_path if remote else None
+        )
 
     def build(self, **kwargs):
         model = self._resolve_model(kwargs)
@@ -56,7 +62,7 @@ class AgentBuilder:
         middleware = _merge_middlewares(_SDK_MIDDLEWARE, kwargs.pop("middleware", None) or [])
         build_native = get_provider_builder(self._config.agent.provider)
         native = build_native(self._config, model, system_prompt, tools, skills, middleware, kwargs)
-        return Agent(native)
+        return Agent(native, card=self._card)
 
     def _resolve_model(self, kwargs: dict):
         provided = kwargs.pop("model", None)

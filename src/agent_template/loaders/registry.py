@@ -25,9 +25,10 @@ class RemoteConfig(BaseModel):
 
 
 class RemoteBundle:
-    def __init__(self, config, skills_dir):
+    def __init__(self, config, skills_dir, card_path=None):
         self.config = config
         self.skills_dir = skills_dir
+        self.card_path = card_path  # zip 內 agent_card.yaml/.json 的解壓路徑,無則 None
 
 
 def fetch_remote(agent_name):
@@ -74,8 +75,15 @@ def _extract(agent_name, zip_bytes):
     raw = yaml.safe_load((target / "config.yaml").read_text(encoding="utf-8")) or {}
     config = RemoteConfig.model_validate(raw)
     skills_dir = target / "skills"
+    card_path = None
+    for name in ("agent_card.yaml", "agent_card.json"):
+        if (target / name).is_file():
+            card_path = str(target / name)
+            break
     logger.info("registry 取得 agent '%s' 定義", agent_name)
-    return RemoteBundle(config, str(skills_dir) if skills_dir.is_dir() else None)
+    return RemoteBundle(
+        config, str(skills_dir) if skills_dir.is_dir() else None, card_path
+    )
 
 
 def _cache_root():

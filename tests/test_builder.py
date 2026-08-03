@@ -225,3 +225,49 @@ def test_no_remote_keeps_local_behavior(project, captured, monkeypatch):
     monkeypatch.setattr(builder, "fetch_remote", lambda name: None)
     AgentBuilder(project).build()
     assert captured["system_prompt"] == "base prompt"
+
+
+# ---- A2A (P7) ----
+
+
+def test_agent_carries_local_card(project, captured):
+    (project.parent / "agent_card.yaml").write_text(
+        "name: my-card\ndescription: d", encoding="utf-8"
+    )
+    agent = AgentBuilder(project).build()
+    assert agent._card.name == "my-card"
+    assert agent.a2a_app() is not None
+
+
+def test_agent_without_card_is_none(project, captured):
+    agent = AgentBuilder(project).build()
+    assert agent._card is None
+
+
+def test_remote_card_wins(project, captured, monkeypatch, tmp_path):
+    from agent_template.core import builder
+
+    (project.parent / "agent_card.yaml").write_text("name: local-card", encoding="utf-8")
+    remote_card = tmp_path / "remote_card.yaml"
+    remote_card.write_text("name: remote-card", encoding="utf-8")
+    bundle = make_bundle(tmp_path)
+    bundle.card_path = str(remote_card)
+    monkeypatch.setattr(builder, "fetch_remote", lambda name: bundle)
+    agent = AgentBuilder(project).build()
+    assert agent._card.name == "remote-card"
+
+
+def test_a2a_tools_join_dedupe_chain(project, captured, monkeypatch):
+    from agent_template.core import builder
+    from langchain_core.tools import StructuredTool
+
+    async def remote_answer(query: str) -> str:
+        return "remote"
+
+    a2a_tool = StructuredTool.from_function(coroutine=remote_answer, name="research", description="d")
+    conflicting = StructuredTool.from_function(coroutine=remote_answer, name="add", description="d")
+    monkeypatch.setattr(builder, "load_a2a_tools", lambda agents: [a2a_tool, conflicting])
+    with pytest.warns(UserWarning, match='tool "add"'):
+        AgentBuilder(project).build()
+    names = [t.name for t in captured["tools"]]
+    assert names == ["add", "research"]  # local 的 add 贏,a2a 的 research 進來

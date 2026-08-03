@@ -18,12 +18,14 @@ skills:
 """
 
 
-def make_zip(config_text=REMOTE_CONFIG, with_skill=True, extra=None):
+def make_zip(config_text=REMOTE_CONFIG, with_skill=True, extra=None, with_card=False):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("config.yaml", config_text)
         if with_skill:
             zf.writestr("skills/haiku/SKILL.md", "---\nname: haiku\ndescription: d\n---\nx")
+        if with_card:
+            zf.writestr("agent_card.yaml", "name: remote-card")
         if extra:
             zf.writestr(extra, "evil")
     return buf.getvalue()
@@ -85,6 +87,19 @@ def test_success_extracts_config_and_skills(cache, monkeypatch):
     assert bundle.config.agent.model == "remote-model"
     assert bundle.config.mcp[0].name == "remote-mcp"
     assert bundle.skills_dir.endswith("my-agent/skills")
+
+
+def test_zip_with_agent_card(cache, monkeypatch):
+    monkeypatch.setattr(
+        registry.httpx, "get", lambda *a, **kw: FakeResponse(200, make_zip(with_card=True))
+    )
+    bundle = registry.fetch_remote("a")
+    assert bundle.card_path.endswith("a/agent_card.yaml")
+
+
+def test_zip_without_agent_card(cache, monkeypatch):
+    monkeypatch.setattr(registry.httpx, "get", lambda *a, **kw: FakeResponse(200, make_zip()))
+    assert registry.fetch_remote("a").card_path is None
 
 
 def test_zip_without_skills_dir(cache, monkeypatch):

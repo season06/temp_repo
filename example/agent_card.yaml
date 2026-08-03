@@ -1,0 +1,10 @@
+# A2A Agent Card:serve() 對外曝露的身分資訊
+name: example-agent
+description: "a helpful example agent"
+version: "0.1.0"
+# url: https://my-agent.example.com   # 正式部署的對外位址;沒填由 serve() 的 host/port 推
+# skills:                             # 沒填給預設單一 chat skill
+#   - id: chat
+#     name: Chat
+#     description: Converse with the agent.
+#     tags: [chat]

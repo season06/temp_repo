@@ -42,6 +42,31 @@ def test_agent_name_field(tmp_path):
     assert config.agent.name == "my-agent"
 
 
+def test_local_a2a_field(tmp_path):
+    text = VALID + '\nlocal_a2a:\n  - name: research\n    url: "http://other:9000"\n'
+    config = load_config(write(tmp_path, "config.yaml", text))
+    assert config.local_a2a[0].name == "research"
+
+
+def test_agent_card_defaults_to_sibling_file(tmp_path):
+    (tmp_path / "agent_card.yaml").write_text("name: x", encoding="utf-8")
+    config = load_config(write(tmp_path, "config.yaml", VALID))
+    assert config.agent_card == str(tmp_path / "agent_card.yaml")
+
+
+def test_agent_card_declared_path_wins(tmp_path):
+    (tmp_path / "cards").mkdir()
+    (tmp_path / "cards" / "c.yaml").write_text("name: x", encoding="utf-8")
+    text = VALID + '\nagent_card: "./cards/c.yaml"\n'
+    config = load_config(write(tmp_path, "config.yaml", text))
+    assert config.agent_card == str(tmp_path / "cards" / "c.yaml")
+
+
+def test_agent_card_empty_when_no_file(tmp_path):
+    config = load_config(write(tmp_path, "config.yaml", VALID))
+    assert config.agent_card == ""
+
+
 def test_unknown_field_fails_with_suggestion(tmp_path):
     bad = VALID.replace("system_prompt", "system_promt")
     with pytest.raises(ConfigError, match="system_prompt"):

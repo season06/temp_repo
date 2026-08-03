@@ -16,8 +16,27 @@ _DONE = object()
 
 
 class Agent:
-    def __init__(self, native):
+    def __init__(self, native, card=None):
         self.native = native
+        self._card = card  # CardSpec;serve()/a2a_app() 才需要
+
+    def a2a_app(self, host="0.0.0.0", port=9000, auth=None):
+        """回傳 A2A 的 ASGI app(掛既有服務、自控部署、測試直打用)。"""
+        from ..a2a.server import build_a2a_app
+        from ..config import ConfigError
+
+        if self._card is None:
+            raise ConfigError(
+                "找不到 agent card:請在 config 同目錄建立 agent_card.yaml,"
+                "或在 config 以 agent_card: 指定路徑"
+            )
+        return build_a2a_app(self, self._card, host=host, port=port, auth=auth)
+
+    def serve(self, host="0.0.0.0", port=9000, auth=None):
+        """一行把 agent 曝露成 A2A 端點(阻塞執行)。"""
+        import uvicorn
+
+        uvicorn.run(self.a2a_app(host=host, port=port, auth=auth), host=host, port=port)
 
     def invoke(self, message):
         return run_sync(self.ainvoke(message))

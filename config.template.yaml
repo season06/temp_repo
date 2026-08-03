@@ -14,3 +14,10 @@ local_tools:
 
 local_skills:
   - "./skills/"
+
+# 遠端 A2A agent(build 時抓對方 card,包成 tool 給 LLM 用)
+# local_a2a:
+#   - name: research-agent
+#     url: http://other-host:9000
+
+# agent_card: "./agent_card.yaml"   # card 檔路徑;不寫預設找同目錄的 agent_card.yaml
