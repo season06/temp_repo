@@ -8,6 +8,45 @@
 
 ---
 
+## Archival
+
+**archival.ttlDuration**
+
+- 宣告：ArchivingWorkflowListenerProperties.java:61，Duration.ZERO，@DurationUnit(SECONDS)
+- 原意：歸檔後讓 workflow 在主存儲再活 TTL 秒才過期，而不是立刻刪 —— 走 ExecutionDAOFacade.removeWorkflowWithExpiry（:402）→ Redis EXPIRE（RedisExecutionDAO.java:450）。MySQL/MariaDB 根本沒實作，直接丟 UnsupportedOperationException（MySQLExecutionDAO.java:312）。
+- 現狀：語意已死。ArchivingWithTTLWorkflowStatusListener.java:41 把它讀進 archiveTTLSeconds，但這個欄位全程沒有任何讀取點；constructor :56 直接 log "Workflow removal with TTL is no longer supported... workflows will be removed immediately"，而 onWorkflowCompleted（:89、:125）呼叫的是 removeWorkflow(id, true)，不是 removeWorkflowWithExpiry。該 TTL 方法在整個 repo 已無生產呼叫點。
+- 它現在唯一的實際作用是 ArchivingWorkflowListenerConfiguration.java:31 的分支開關：
+
+┌─────────────┬─────────┬────────────────────────────────────────┬────────────────────────────────────────┐
+│ ttlDuration │  type   │            得到的 listener             │                歸檔行為                │
+├─────────────┼─────────┼────────────────────────────────────────┼────────────────────────────────────────┤
+│ 0（預設）   │ DEFAULT │ ArchivingWorkflowStatusListener        │ 同步、無延遲，跑在觸發它的那條執行緒上 │
+├─────────────┼─────────┼────────────────────────────────────────┼────────────────────────────────────────┤
+│ >0          │ DEFAULT │ ArchivingWithTTLWorkflowStatusListener │ TTL 被忽略，但啟用 delay queue         │
+├─────────────┼─────────┼────────────────────────────────────────┼────────────────────────────────────────┤
+│ 0           │ S3      │ ArchivingWorkflowToS3                  │ 先寫 S3，也有 delay queue              │
+└─────────────┴─────────┴────────────────────────────────────────┴────────────────────────────────────────┘
+
+**archival.delaySeconds**
+
+- 讀取：ArchivingWorkflowListenerProperties.java:115-121，預設 60
+- fallback 寫的是 conductor.app.asyncUpdateDelaySeconds —— 這個 key 不存在（ConductorProperties 的欄位是 asyncUpdateDelay，:142），而 Environment.getProperty 是字面查找、不走 relaxed
+  binding。所以除非你刻意用那個拼法，實際預設恆為 60。
+- >0 時把 removeWorkflow 包成 DelayArchiveWorkflow 丟進 ScheduledThreadPoolExecutor(delayQueueWorkerThreadCount) 延後執行（:84）；=0 則同步刪（:89）。
+- 兩個效果，對你們重要的是第二個：
+  a. 延後：避免 workflow 剛終結時 client 還在 getWorkflow / 最後一次 index update 還沒落地就被刪掉。
+  b. 換執行緒：把 1+N 次 MariaDB transaction、1+N 次 ES 寫、N+1 次 Redis 從 Tomcat  這就是 tomcat-thread-exhaustion-analysis.md 那條路徑的直接解法（bulkhead）。
+                                                                                                                                              議值
+
+conductor.workflow-status-listener.type=archive                                                                                               僅為啟用 delay queue 路徑；TTL 語意已失效，設大值沒有任何作用
+conductor.workflow-status-listener.archival.ttlDuration=1s
+conductor.workflow-status-listener.archival.delaySeconds=60
+conductor.workflow-status-listener.archival.delayQueueWorkerThreadCount=5
+ttlDuration=1s —— 取最小非零值。它不代表「資料多留 1 秒」，純粹是開關。別設 3600s後看配置的人誤判資料還在。啟動時會出現那行誤導性的 no longer supportedwarning，屬預期。                                                                                                                           delaySeconds=60（保持預設）—— 下限別低於 conductor.app.asyncUpdateDelay（60s）： d，短命 workflow 的最後一次 index update 本身延後60s（ExecutionDAOFacade.java:297-306），歸檔若更早寫入 rawJSON 會被那次 update 蓋掉。上限也別拉大：delay queue 是無界 queue，@PreDestroy 只 awaitTermination(delaySeconds)（:66），重啟時排在後面的歸檔會被 shutdownNow 丟棄 ariaDB 不再被歸檔（不是資料遺失，是洩漏）。60s 下的 in-flight 量約為 60 × 歸檔速率。
+- delayQueueWorkerThreadCount=5（保持預設，先別調高）—— 每條歸檔執行緒各自會佔一條 HikariCP 連線，而池只有 10。調到 10 等於讓歸檔有機會吃光整個 DB 池，瓶頸會從 Tomcat 轉嫁到所有 DB 操作。要提吞吐的順序是：先加大 Hikari，再調這個；ES 側的天花板是 RestClient 預設 archV7Configuration.java:53-79 沒有自訂）。
+
+---
+
 ## A. 瓶頸在哪
 
 先算一次歸檔的實際成本。`removeWorkflow(id, true)` 對一個有 **N 個 task** 的 workflow：
